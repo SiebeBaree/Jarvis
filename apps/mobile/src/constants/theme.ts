@@ -63,3 +63,57 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/**
+ * Score bands map a 0–100 score onto a semantic color. Each band carries a
+ * light- and dark-scheme color tuned to feel native alongside the base palette.
+ */
+export const ScoreBands = {
+  slate: {
+    light: '#8A8F98',
+    dark: '#9BA1AA',
+  },
+  amber: {
+    light: '#E5960B',
+    dark: '#F5B841',
+  },
+  green: {
+    light: '#2CA24C',
+    dark: '#4CD268',
+  },
+  gold: {
+    light: '#C79A1E',
+    dark: '#E9C558',
+  },
+} as const;
+
+export type ScoreBand = keyof typeof ScoreBands;
+
+/** Returns the band key for a score. Scores are clamped to the 0–100 range. */
+export function scoreBand(score: number): ScoreBand {
+  if (score >= 90) return 'gold';
+  if (score >= 70) return 'green';
+  if (score >= 50) return 'amber';
+  return 'slate';
+}
+
+/**
+ * Area colors give each life area a distinct, harmonized hue with light- and
+ * dark-scheme variants.
+ */
+export const AreaColors = {
+  business: {
+    light: '#3B5BDB',
+    dark: '#6E8BFF',
+  },
+  social: {
+    light: '#F06543',
+    dark: '#FF8462',
+  },
+  physical: {
+    light: '#1B9E77',
+    dark: '#3FCFA0',
+  },
+} as const;
+
+export type Area = keyof typeof AreaColors;
