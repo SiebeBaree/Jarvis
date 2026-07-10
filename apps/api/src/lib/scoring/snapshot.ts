@@ -2,7 +2,7 @@
 // recomputes/upserts daily_scores rows, and lazily finalizes past days once
 // their week has fully ended (weekly-habit reconciliation needs the whole week).
 
-import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   blocks,
@@ -256,11 +256,14 @@ export async function recomputeDay(
 // Lazy finalization: at most once per interval per lambda instance.
 const lastFinalizeCheck = new Map<string, number>();
 const FINALIZE_INTERVAL_MS = 10 * 60 * 1000;
-const FINALIZE_LOOKBACK_DAYS = 45;
+const FINALIZE_MAX_DAYS_PER_RUN = 400;
 
 /**
  * Finalize every day in completed weeks that has no final snapshot yet —
  * including days the app was never opened (missed habits still score).
+ * Resumes from the day after the latest final snapshot (else account start),
+ * oldest-first, capped per invocation so one request never processes an
+ * unbounded backlog — the remainder finalizes on subsequent requests.
  */
 export async function finalizeThrough(userId: string, settings: SettingsRow, now = new Date()): Promise<void> {
   const last = lastFinalizeCheck.get(userId);
@@ -274,22 +277,17 @@ export async function finalizeThrough(userId: string, settings: SettingsRow, now
   const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
   if (!user) return;
   const accountStart = dayKeyFor(user.createdAt, settings.timezone, settings.dayBoundaryHour);
-  const lookbackStart = addDays(today, -FINALIZE_LOOKBACK_DAYS);
-  const from = accountStart > lookbackStart ? accountStart : lookbackStart;
-  if (from > finalizeEnd) return;
-
-  const existing = await db.query.dailyScores.findMany({
-    where: and(
-      eq(dailyScores.userId, userId),
-      gte(dailyScores.dayKey, from),
-      lte(dailyScores.dayKey, finalizeEnd),
-      eq(dailyScores.isFinal, true),
-    ),
+  const latestFinal = await db.query.dailyScores.findFirst({
+    where: and(eq(dailyScores.userId, userId), eq(dailyScores.isFinal, true)),
+    orderBy: [desc(dailyScores.dayKey)],
     columns: { dayKey: true },
   });
-  const finalized = new Set(existing.map((r) => r.dayKey));
+  const from = latestFinal ? addDays(latestFinal.dayKey, 1) : accountStart;
+  if (from > finalizeEnd) return;
 
+  let processed = 0;
   for (let day = from; day <= finalizeEnd; day = addDays(day, 1)) {
-    if (!finalized.has(day)) await recomputeDay(userId, settings, day, now);
+    await recomputeDay(userId, settings, day, now);
+    if (++processed >= FINALIZE_MAX_DAYS_PER_RUN) break;
   }
 }

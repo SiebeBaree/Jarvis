@@ -20,6 +20,17 @@ export const PATCH = handler(
     });
     if (!existing) throw new ApiError(404, "not_found", "Habit not found");
 
+    if (patch.targetReps !== undefined) {
+      const target = patch.targetReps;
+      const invalid =
+        (existing.type === "daily" && target !== 1) ||
+        (existing.type === "multi_daily" && (target < 2 || target > 10)) ||
+        (existing.type === "weekly_frequency" && (target < 1 || target > 7));
+      if (invalid) {
+        throw new ApiError(400, "invalid_target", `targetReps ${target} is not valid for a ${existing.type} habit`);
+      }
+    }
+
     const { paused, ...fields } = patch;
     const set: Partial<typeof habits.$inferInsert> = { ...fields };
     if (paused === true) set.pausedAt = existing.pausedAt ?? new Date();

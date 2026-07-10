@@ -34,6 +34,7 @@ export const POST = handler(async (request: Request) => {
       rule: body.rule,
       startDate: body.startDate,
       endDate: body.endDate ?? null,
+      showInReviewWeek: body.showInReviewWeek ?? false,
     })
     .returning();
   if (!created) throw new ApiError(500, "internal_error", "Could not create template");

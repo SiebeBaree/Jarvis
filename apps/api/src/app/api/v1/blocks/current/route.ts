@@ -3,18 +3,17 @@
 // and computed progress.
 
 import { NextResponse } from "next/server";
-import { and, asc, eq, gt, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { areas, blocks, dailyScores, goals, tactics } from "@/db/schema";
+import { areas, blocks, goals, tactics } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
+import { weeklyScoreAverages } from "@/lib/blocks";
 import { isReviewWeek as isReviewWeekFn, weekIndexInBlock } from "@/lib/daykey";
 import { handler } from "@/lib/http";
 import { activeBlockFor, todayKey } from "@/lib/scoring/snapshot";
 import { completedWeeksByTactic, type TacticRow } from "@/lib/tactics";
 
 export const runtime = "nodejs";
-
-const WEEKS_IN_BLOCK = 13; // 12 execution weeks + review week
 
 type TacticWithWeeks = TacticRow & { completedWeeks: number[] };
 
@@ -78,30 +77,10 @@ export const GET = handler(async (request: Request) => {
   const weekNumber = isUpcoming ? null : weekIndexInBlock(today, block.startDate);
   const reviewWeek = isUpcoming ? false : isReviewWeekFn(today, block.startDate, block.endDate);
 
-  // One query over daily_scores between block dates; grouped into weeks here.
-  const scoreRows = await db.query.dailyScores.findMany({
-    where: and(
-      eq(dailyScores.userId, ctx.userId),
-      gte(dailyScores.dayKey, block.startDate),
-      lte(dailyScores.dayKey, block.endDate),
-    ),
-  });
-  const totalsByWeek = new Map<number, number[]>();
-  for (const row of scoreRows) {
-    if (row.total === null) continue;
-    const week = weekIndexInBlock(row.dayKey, block.startDate);
-    const list = totalsByWeek.get(week);
-    if (list) list.push(row.total);
-    else totalsByWeek.set(week, [row.total]);
-  }
-  const weekScores = Array.from({ length: WEEKS_IN_BLOCK }, (_, i) => {
-    const totals = totalsByWeek.get(i + 1) ?? [];
-    const avg =
-      totals.length === 0
-        ? null
-        : Math.round((totals.reduce((sum, t) => sum + t, 0) / totals.length) * 100) / 100;
-    return { weekNumber: i + 1, avg };
-  });
+  // Shared week-avg computation; this payload keeps only {weekNumber, avg}.
+  const weekScores = (await weeklyScoreAverages(ctx.userId, block)).map(
+    ({ weekNumber: n, avg }) => ({ weekNumber: n, avg }),
+  );
 
   // Goals of THIS block, with their area and tactics.
   const goalRows = await db

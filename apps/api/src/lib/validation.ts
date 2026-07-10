@@ -25,9 +25,22 @@ export const registerSchema = z.object({
 });
 
 // ---------- settings ----------
+export function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const settingsPatchSchema = z
   .object({
-    timezone: z.string().min(1).optional(),
+    timezone: z
+      .string()
+      .min(1)
+      .refine(isValidTimezone, { message: "must be a valid IANA timezone" })
+      .optional(),
     dayBoundaryHour: z.number().int().min(0).max(6).optional(),
     weekStartsOn: z.literal(1).optional(), // Monday only for now
     scoreWeights: z
@@ -183,6 +196,7 @@ export const templateCreateSchema = z.object({
   rule: recurrenceRuleSchema,
   startDate: dayKeySchema,
   endDate: dayKeySchema.nullish(),
+  showInReviewWeek: z.boolean().optional(),
 });
 export const templatePatchSchema = templateCreateSchema.partial().extend({
   paused: z.boolean().optional(),
@@ -249,4 +263,52 @@ export const moodPutSchema = z.object({
 export const scoresQuerySchema = z.object({
   from: dayKeySchema,
   to: dayKeySchema,
+});
+export const weeklyScoresQuerySchema = z.object({
+  blockId: z.string().uuid(),
+});
+
+// ---------- reviews ----------
+export const weeklyReviewStartSchema = z.object({
+  weekNumber: z.number().int().min(1).max(13).optional(),
+});
+
+// ---------- body metrics ----------
+export const metricTypeCreateSchema = z.object({
+  name: z.string().min(1).max(60),
+  unit: z.string().min(1).max(20),
+  decimals: z.number().int().min(0).max(3).default(1),
+  goalValue: z.number().nullish(),
+  goalDirection: z.enum(["up", "down"]).nullish(),
+});
+export const metricTypePatchSchema = metricTypeCreateSchema
+  .partial()
+  .extend({ archived: z.boolean().optional() })
+  .strict();
+export const metricTypesQuerySchema = z.object({
+  includeArchived: z.enum(["true", "false"]).optional(),
+});
+export const metricEntriesQuerySchema = z.object({
+  typeId: z.string().uuid(),
+  from: dayKeySchema.optional(),
+  to: dayKeySchema.optional(),
+});
+export const metricEntryPutSchema = z.object({
+  value: z.number(),
+});
+
+// ---------- progress photos ----------
+export const photosQuerySchema = z.object({
+  from: dayKeySchema.optional(),
+  to: dayKeySchema.optional(),
+});
+export const photoUploadQuerySchema = z.object({
+  angle: z.string().min(1).max(30),
+  dayKey: dayKeySchema,
+});
+
+// ---------- AI chat ----------
+export const chatRequestSchema = z.object({
+  conversationId: z.string().uuid().nullish(),
+  message: z.string().min(1).max(8000),
 });

@@ -6,6 +6,11 @@ import { sessions, settings, users } from "@/db/schema";
 import { ApiError } from "./http";
 
 const PEPPER = process.env.AUTH_PEPPER ?? "";
+if (!PEPPER) {
+  console.warn(
+    "AUTH_PEPPER is not set — password hashes created now will stop verifying if a pepper is added later.",
+  );
+}
 
 export async function hashPassword(password: string): Promise<string> {
   return hash(password + PEPPER);

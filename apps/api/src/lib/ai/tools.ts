@@ -5,7 +5,7 @@
 // Strict-schema note: OpenAI strict mode requires every field to be required,
 // so args use .nullable() instead of .optional(); executors treat null as absent.
 
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -23,7 +23,7 @@ import { addDays, isValidDayKey, weekStart } from "../daykey";
 import { buildHabitStats, habitRepsByDay } from "../habit-stats";
 import { ApiError } from "../http";
 import { recomputeDay, todayKey } from "../scoring/snapshot";
-import { setTaskStatus } from "../task-status";
+import { setTaskCompletion } from "../task-status";
 import { buildDayPayload } from "../today";
 
 export interface ToolContext {
@@ -149,7 +149,7 @@ const READ_TOOLS = {
       });
       if (!habit) throw new ApiError(404, "not_found", "Habit not found");
       const reps = await habitRepsByDay(ctx.userId, habit.id);
-      return buildHabitStats(habit, reps, ctx.settings);
+      return buildHabitStats(habit, ctx.settings, todayKey(ctx.settings), reps);
     },
   },
   get_mood: {
@@ -275,8 +275,10 @@ const MUTATING_TOOLS = {
       priority: priorityArg.nullable(),
       goalId: z.string().uuid().nullable(),
     }),
-    summarize: async (a) => {
-      const existing = await db.query.tasks.findFirst({ where: eq(tasks.id, a.taskId) });
+    summarize: async (a, ctx) => {
+      const existing = await db.query.tasks.findFirst({
+        where: and(eq(tasks.id, a.taskId), eq(tasks.userId, ctx.userId)),
+      });
       const changes = [
         a.title ? `title → "${a.title}"` : null,
         a.clearDueDate ? "due → none" : a.dueDate ? `due → ${a.dueDate}` : null,
@@ -308,17 +310,22 @@ const MUTATING_TOOLS = {
   complete_task: mutating({
     description: "Mark a task done.",
     args: z.strictObject({ taskId: z.string().uuid() }),
-    summarize: async (a) => {
-      const t = await db.query.tasks.findFirst({ where: eq(tasks.id, a.taskId) });
+    summarize: async (a, ctx) => {
+      const t = await db.query.tasks.findFirst({
+        where: and(eq(tasks.id, a.taskId), eq(tasks.userId, ctx.userId)),
+      });
       return `Complete task "${t?.title ?? a.taskId}"`;
     },
-    execute: async (ctx, a) => setTaskStatus(ctx.userId, ctx.settings, a.taskId, "done"),
+    execute: async (ctx, a) =>
+      setTaskCompletion({ userId: ctx.userId, settings: ctx.settings, email: "", rawToken: "" }, a.taskId, true),
   }),
   delete_task: mutating({
     description: "Delete a task permanently.",
     args: z.strictObject({ taskId: z.string().uuid() }),
-    summarize: async (a) => {
-      const t = await db.query.tasks.findFirst({ where: eq(tasks.id, a.taskId) });
+    summarize: async (a, ctx) => {
+      const t = await db.query.tasks.findFirst({
+        where: and(eq(tasks.id, a.taskId), eq(tasks.userId, ctx.userId)),
+      });
       return `Delete task "${t?.title ?? a.taskId}"`;
     },
     execute: async (ctx, a) => {
@@ -374,8 +381,10 @@ const MUTATING_TOOLS = {
       targetReps: z.number().int().min(1).max(10).nullable(),
       plannedDays: z.array(z.number().int().min(1).max(7)).nullable(),
     }),
-    summarize: async (a) => {
-      const h = await db.query.habits.findFirst({ where: eq(habits.id, a.habitId) });
+    summarize: async (a, ctx) => {
+      const h = await db.query.habits.findFirst({
+        where: and(eq(habits.id, a.habitId), eq(habits.userId, ctx.userId)),
+      });
       const changes = [
         a.name ? `name → "${a.name}"` : null,
         a.targetReps ? `target → ${a.targetReps}` : null,
@@ -403,8 +412,10 @@ const MUTATING_TOOLS = {
   archive_habit: mutating({
     description: "Archive a habit (stops counting from today; history kept).",
     args: z.strictObject({ habitId: z.string().uuid() }),
-    summarize: async (a) => {
-      const h = await db.query.habits.findFirst({ where: eq(habits.id, a.habitId) });
+    summarize: async (a, ctx) => {
+      const h = await db.query.habits.findFirst({
+        where: and(eq(habits.id, a.habitId), eq(habits.userId, ctx.userId)),
+      });
       return `Archive habit "${h?.name ?? a.habitId}"`;
     },
     execute: async (ctx, a) => {
@@ -419,8 +430,10 @@ const MUTATING_TOOLS = {
   log_habit: mutating({
     description: "Log one habit rep for today (or a past dayKey).",
     args: z.strictObject({ habitId: z.string().uuid(), dayKey: dayKeyArg.nullable() }),
-    summarize: async (a) => {
-      const h = await db.query.habits.findFirst({ where: eq(habits.id, a.habitId) });
+    summarize: async (a, ctx) => {
+      const h = await db.query.habits.findFirst({
+        where: and(eq(habits.id, a.habitId), eq(habits.userId, ctx.userId)),
+      });
       return `Log "${h?.name ?? a.habitId}"${a.dayKey ? ` for ${a.dayKey}` : " for today"}`;
     },
     execute: async (ctx, a) => {
@@ -430,6 +443,27 @@ const MUTATING_TOOLS = {
       if (!habit) throw new ApiError(404, "not_found", "Habit not found");
       const dayKey = a.dayKey ?? todayKey(ctx.settings);
       if (dayKey > todayKey(ctx.settings)) throw new ApiError(400, "future_day", "Cannot log the future");
+      if (dayKey < habit.startDate) {
+        throw new ApiError(400, "before_start", "Cannot log before the habit's start date");
+      }
+      // Same guards as POST /habits/:id/log — never overshoot the daily target.
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(habitCompletions)
+        .where(
+          and(
+            eq(habitCompletions.userId, ctx.userId),
+            eq(habitCompletions.habitId, habit.id),
+            eq(habitCompletions.dayKey, dayKey),
+          ),
+        );
+      const reps = row?.n ?? 0;
+      if (habit.type === "daily" && reps >= 1) {
+        throw new ApiError(409, "already_logged", "Habit already logged for that day");
+      }
+      if (habit.type === "multi_daily" && reps >= habit.targetReps) {
+        throw new ApiError(409, "target_reached", "Daily target already reached");
+      }
       await db.insert(habitCompletions).values({ userId: ctx.userId, habitId: habit.id, dayKey });
       await recomputeFor(ctx, dayKey);
       return { logged: true, dayKey };
@@ -482,8 +516,10 @@ const MUTATING_TOOLS = {
       status: z.enum(["active", "achieved", "dropped"]).nullable(),
       trackStatus: z.enum(["on_track", "at_risk", "done"]).nullable(),
     }),
-    summarize: async (a) => {
-      const g = await db.query.goals.findFirst({ where: eq(goals.id, a.goalId) });
+    summarize: async (a, ctx) => {
+      const g = await db.query.goals.findFirst({
+        where: and(eq(goals.id, a.goalId), eq(goals.userId, ctx.userId)),
+      });
       const changes = [
         a.title ? `title → "${a.title}"` : null,
         a.status ? `status → ${a.status}` : null,

@@ -6,6 +6,7 @@ import { and, asc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { db } from "@/db/client";
 import { habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
 import type { SettingsRow } from "./auth";
+import { reconcileBlockStatuses } from "./blocks";
 import { addDays, weekEnd, weekStart, weekIndexInBlock, type DayKey } from "./daykey";
 import { occurrencesToGenerate } from "./recurrence";
 import { paceStatus, type PaceStatus } from "./scoring/engine";
@@ -107,6 +108,11 @@ export interface DayPayload {
   mood: { value: number; note: string | null } | null;
   /** Today only: yesterday has no mood entry yet (backfill row in the UI). */
   yesterdayMoodMissing: boolean;
+  /**
+   * Review week only: top-level non-cancelled tasks due this day that are
+   * hidden by the week-13 task pause ("tasks are paused" copy). 0 otherwise.
+   */
+  pausedTaskCount: number;
 }
 
 export async function buildDayPayload(
@@ -118,6 +124,7 @@ export async function buildDayPayload(
 ): Promise<DayPayload> {
   if (options.isToday) {
     await materializeTemplates(userId, settings, now);
+    await reconcileBlockStatuses(userId, dayKey);
     await finalizeThrough(userId, settings, now);
   }
 
@@ -129,7 +136,8 @@ export async function buildDayPayload(
       where: and(eq(tasks.userId, userId), eq(tasks.dueDate, dayKey), isNull(tasks.parentTaskId)),
       orderBy: [asc(tasks.sortOrder), asc(tasks.createdAt)],
     }),
-    options.isToday
+    // Review week pauses tasks: no overdue nagging during week 13.
+    !snapshot.isReviewWeek
       ? db.query.tasks.findMany({
           where: and(
             eq(tasks.userId, userId),
@@ -152,6 +160,31 @@ export async function buildDayPayload(
         })
       : Promise.resolve(undefined),
   ]);
+
+  // Week 13 hides due tasks except templates that opted into "Scheduled anyway".
+  let visibleDue = dueTop;
+  let pausedTaskCount = 0;
+  if (snapshot.isReviewWeek) {
+    const templateIds = [
+      ...new Set(dueTop.map((t) => t.templateId).filter((id): id is string => id !== null)),
+    ];
+    const shownTemplates =
+      templateIds.length === 0
+        ? []
+        : await db.query.recurrenceTemplates.findMany({
+            where: and(
+              inArray(recurrenceTemplates.id, templateIds),
+              eq(recurrenceTemplates.showInReviewWeek, true),
+            ),
+            columns: { id: true },
+          });
+    const shown = new Set(shownTemplates.map((t) => t.id));
+    visibleDue = dueTop.filter((t) => t.templateId !== null && shown.has(t.templateId));
+    const visibleIds = new Set(visibleDue.map((t) => t.id));
+    pausedTaskCount = dueTop.filter(
+      (t) => t.status !== "cancelled" && !visibleIds.has(t.id),
+    ).length;
+  }
 
   const hour = localHour(settings, now);
   const creditByHabit = new Map(snapshot.breakdown.habits.map((h) => [h.habitId, h.credit]));
@@ -204,10 +237,11 @@ export async function buildDayPayload(
         }
       : null,
     score: snapshot,
-    tasksDue: await withSubtasks(dueTop),
+    tasksDue: await withSubtasks(visibleDue),
     overdueTasks: await withSubtasks(overdueTop),
     habits: habitEntries,
     mood: mood ? { value: mood.value, note: mood.note } : null,
     yesterdayMoodMissing: options.isToday && !yesterdayMood,
+    pausedTaskCount,
   };
 }

@@ -21,9 +21,12 @@ export const PATCH = handler(
     });
     if (!existing) throw new ApiError(404, "not_found", "Task not found");
 
+    // Reverting to open (or cancelling) clears any stale completion timestamp.
+    const completedAtPatch =
+      patch.status === "open" || patch.status === "cancelled" ? { completedAt: null } : {};
     const [updated] = await db
       .update(tasks)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({ ...patch, ...completedAtPatch, updatedAt: new Date() })
       .where(and(eq(tasks.id, id), eq(tasks.userId, ctx.userId)))
       .returning();
     if (!updated) throw new ApiError(404, "not_found", "Task not found");

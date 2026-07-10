@@ -34,6 +34,9 @@ export const PATCH = handler(
     if (patch.endDate !== undefined) set.endDate = patch.endDate;
     if (patch.paused === true) set.pausedAt = existing.pausedAt ?? new Date();
     if (patch.paused === false) set.pausedAt = null;
+    // Display-only flag: changes week-13 visibility, never the occurrences —
+    // so it deliberately does NOT trigger the delete-future-occurrences dance.
+    if (patch.showInReviewWeek !== undefined) set.showInReviewWeek = patch.showInReviewWeek;
 
     // Content edits affect FUTURE occurrences only: drop open, not-yet-due
     // occurrences and regenerate them from the updated template.
