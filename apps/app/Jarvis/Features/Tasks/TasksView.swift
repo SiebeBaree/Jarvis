@@ -1,0 +1,307 @@
+import DesignSystem
+import JarvisAPI
+import SwiftUI
+
+/// Route wrapper so a task id can drive `navigationDestination(item:)`.
+private struct TaskRoute: Identifiable, Hashable {
+    let id: String
+}
+
+struct TasksView: View {
+    @Environment(AppModel.self) private var model
+    @State private var store = TasksStore()
+    @State private var showingEditor = false
+    @State private var showingRecurring = false
+    #if os(macOS)
+    @State private var selectedTaskId: String?
+    #else
+    @State private var detailRoute: TaskRoute?
+    #endif
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Segment", selection: $store.segment) {
+                ForEach(TasksStore.Segment.allCases) { segment in
+                    Text(segment.title).tag(segment)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, PageMargin.standard)
+            .padding(.vertical, Space.sm)
+
+            if let actionError = store.actionError {
+                inlineError(actionError)
+            }
+
+            listContent
+        }
+        #if os(macOS)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
+        #endif
+        .background(Color.bgCanvas)
+        .navigationTitle("Tasks")
+        .searchable(text: $store.searchText, prompt: "Search tasks")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingEditor = true
+                } label: {
+                    Label("New task", systemImage: "plus")
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                Menu {
+                    Button("Recurring tasks") { showingRecurring = true }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showingEditor) {
+            TaskEditorView(goals: store.goals, defaultDueDate: store.todayKey) {
+                await store.fetch()
+            }
+        }
+        .navigationDestination(isPresented: $showingRecurring) {
+            RecurringTasksView()
+        }
+        #if os(macOS)
+        .inspector(isPresented: inspectorShown) {
+            if let selectedTaskId {
+                NavigationStack {
+                    TaskDetailView(taskId: selectedTaskId, store: store) {
+                        self.selectedTaskId = nil
+                    }
+                }
+                .inspectorColumnWidth(min: 300, ideal: 320, max: 400)
+            }
+        }
+        #else
+        .navigationDestination(item: $detailRoute) { route in
+            TaskDetailView(taskId: route.id, store: store)
+        }
+        #endif
+        .task {
+            store.bind(model)
+            await store.fetchGoals()
+            await store.fetch()
+        }
+    }
+
+    #if os(macOS)
+    private var inspectorShown: Binding<Bool> {
+        Binding(
+            get: { selectedTaskId != nil },
+            set: { if !$0 { selectedTaskId = nil } },
+        )
+    }
+    #endif
+
+    // MARK: - List
+
+    @ViewBuilder
+    private var listContent: some View {
+        switch store.state {
+        case .idle, .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed(let message):
+            VStack(spacing: Space.md) {
+                Text(message)
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.danger)
+                    .multilineTextAlignment(.center)
+                Button("Retry") {
+                    Task { await store.fetch() }
+                }
+                .buttonStyle(.jarvisSecondary)
+            }
+            .padding(PageMargin.standard)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        case .loaded:
+            segmentList
+        }
+    }
+
+    @ViewBuilder
+    private var segmentList: some View {
+        switch store.segment {
+        case .today:
+            let overdue = store.overdueTasks
+            let today = store.todayTasks
+            if overdue.isEmpty && today.isEmpty {
+                emptyState("No tasks today — add one")
+            } else {
+                taskList {
+                    if !overdue.isEmpty {
+                        Section {
+                            ForEach(overdue) { task in
+                                row(
+                                    for: task,
+                                    overdueLabel: task.dueDate.map { "was due \(TaskDateLabels.shortLabel(for: $0))" },
+                                )
+                            }
+                        } header: {
+                            captionHeader("Overdue", color: .warning)
+                        }
+                    }
+                    if !today.isEmpty {
+                        Section {
+                            ForEach(today) { task in
+                                row(for: task)
+                            }
+                        } header: {
+                            captionHeader("Today")
+                        }
+                    }
+                }
+            }
+        case .upcoming:
+            let groups = store.upcomingGroups
+            if groups.isEmpty {
+                emptyState("Nothing scheduled ahead")
+            } else {
+                taskList {
+                    ForEach(groups) { group in
+                        Section {
+                            ForEach(group.tasks) { task in
+                                row(for: task)
+                            }
+                        } header: {
+                            captionHeader(group.title)
+                        }
+                    }
+                }
+            }
+        case .all:
+            let tasks = store.allTasks
+            if tasks.isEmpty {
+                emptyState("No tasks — add one")
+            } else {
+                taskList {
+                    ForEach(tasks) { task in
+                        row(for: task)
+                    }
+                }
+            }
+        case .done:
+            let tasks = store.doneTasks
+            if tasks.isEmpty {
+                emptyState("Nothing completed yet")
+            } else {
+                taskList {
+                    ForEach(tasks) { task in
+                        VStack(alignment: .leading, spacing: 0) {
+                            row(for: task)
+                            if let completedAt = task.completedAt,
+                               let label = TaskDateLabels.completedLabel(for: completedAt) {
+                                Text("Completed \(label)")
+                                    .font(.captionJ)
+                                    .foregroundStyle(Color.textTertiary)
+                                    .padding(.leading, 34)
+                                    .padding(.bottom, Space.xs)
+                            }
+                        }
+                        .listRowBackground(Color.bgCanvas)
+                    }
+                }
+            }
+        }
+    }
+
+    private func taskList(@ViewBuilder content: () -> some View) -> some View {
+        List {
+            content()
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable { await store.fetch() }
+    }
+
+    // MARK: - Rows & helpers
+
+    private func row(for task: TaskDTO, overdueLabel: String? = nil) -> some View {
+        TaskRow(
+            task: task,
+            goalTitle: store.goalTitle(for: task.goalId),
+            overdueLabel: overdueLabel,
+            onToggle: {
+                Task { await store.toggleComplete(task) }
+            },
+            onTap: { open(task) },
+        )
+        .listRowBackground(Color.bgCanvas)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if task.status == .open {
+                Button {
+                    Task { await store.toggleComplete(task) }
+                } label: {
+                    Label("Complete", systemImage: "checkmark")
+                }
+                .tint(.success)
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if task.status == .open {
+                Button {
+                    Task { await store.reschedule(task, to: store.todayKey) }
+                } label: {
+                    Label("Today", systemImage: "sun.max")
+                }
+                .tint(.accentPrimary)
+
+                Button {
+                    Task { await store.reschedule(task, to: DayKeyMath.addDays(store.todayKey, 1)) }
+                } label: {
+                    Label("Tomorrow", systemImage: "arrow.right")
+                }
+                .tint(.textSecondary)
+            }
+        }
+    }
+
+    private func open(_ task: TaskDTO) {
+        #if os(macOS)
+        selectedTaskId = task.id
+        #else
+        detailRoute = TaskRoute(id: task.id)
+        #endif
+    }
+
+    private func captionHeader(_ title: String, color: Color = .textSecondary) -> some View {
+        Text(title.uppercased())
+            .font(.captionJ)
+            .tracking(0.6)
+            .foregroundStyle(color)
+    }
+
+    private func emptyState(_ message: String) -> some View {
+        VStack(spacing: Space.md) {
+            Text(message)
+                .font(.bodyJ)
+                .foregroundStyle(Color.textSecondary)
+            Button("Add task") { showingEditor = true }
+                .buttonStyle(.jarvisGhost)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(PageMargin.standard)
+    }
+
+    private func inlineError(_ message: String) -> some View {
+        HStack(spacing: Space.sm) {
+            Text(message)
+                .font(.subheadJ)
+                .foregroundStyle(Color.danger)
+            Spacer(minLength: Space.sm)
+            Button("Dismiss") { store.actionError = nil }
+                .font(.subheadJ)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentPrimary)
+        }
+        .padding(.horizontal, PageMargin.standard)
+        .padding(.vertical, Space.xs)
+    }
+}

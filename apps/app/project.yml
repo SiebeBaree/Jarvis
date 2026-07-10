@@ -1,0 +1,63 @@
+name: Jarvis
+options:
+  bundleIdPrefix: com.siebebaree
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+packages:
+  JarvisAPI:
+    path: Packages/JarvisAPI
+  DesignSystem:
+    path: Packages/DesignSystem
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    CODE_SIGN_STYLE: Automatic
+  configs:
+    Debug:
+      # Ad-hoc signing so local/CLI builds work without a development team.
+      CODE_SIGN_IDENTITY: "-"
+
+targets:
+  Jarvis:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - Jarvis
+    dependencies:
+      - package: JarvisAPI
+      - package: DesignSystem
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.siebebaree.jarvis
+        TARGETED_DEVICE_FAMILY: "1" # iPhone only (no iPad)
+        ENABLE_PREVIEWS: YES
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    info:
+      path: Jarvis/Info.plist
+      properties:
+        UILaunchScreen: {}
+        LSApplicationCategoryType: public.app-category.productivity
+        API_BASE_URL: $(API_BASE_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: Jarvis/Jarvis.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+
+  JarvisTests:
+    type: bundle.unit-test
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - JarvisTests
+    dependencies:
+      - target: Jarvis

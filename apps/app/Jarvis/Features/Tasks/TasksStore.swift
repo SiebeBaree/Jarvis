@@ -1,0 +1,327 @@
+import Foundation
+import JarvisAPI
+import Observation
+
+/// Store backing the Tasks tab: segment state, per-segment fetches, and the
+/// task mutations shared by the list and detail screens.
+@Observable @MainActor
+final class TasksStore {
+    enum Segment: String, CaseIterable, Identifiable {
+        case today
+        case upcoming
+        case all
+        case done
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .today: "Today"
+            case .upcoming: "Upcoming"
+            case .all: "All"
+            case .done: "Done"
+            }
+        }
+    }
+
+    struct TaskGroup: Identifiable {
+        let id: String
+        let title: String
+        let tasks: [TaskDTO]
+    }
+
+    private var model: AppModel?
+
+    var segment: Segment = .today {
+        didSet {
+            guard segment != oldValue else { return }
+            Task { await fetch() }
+        }
+    }
+
+    var searchText = ""
+    /// Inline error from a mutation (fetch errors live in `state`).
+    var actionError: String?
+
+    private(set) var state: LoadState<[TaskDTO]> = .idle
+    /// Open tasks without a due date (view "inbox"), merged into Upcoming.
+    private(set) var noDateTasks: [TaskDTO] = []
+    private(set) var goals: [GoalDTO] = []
+    /// Every task seen in any fetch, so the detail screen can start instantly.
+    private(set) var cache: [String: TaskDTO] = [:]
+
+    func bind(_ model: AppModel) {
+        if self.model == nil { self.model = model }
+    }
+
+    var todayKey: String {
+        DayKeyMath.todayKey(boundaryHour: model?.settings?.dayBoundaryHour ?? 3)
+    }
+
+    func goalTitle(for goalId: String?) -> String? {
+        guard let goalId else { return nil }
+        return goals.first { $0.id == goalId }?.title
+    }
+
+    func task(withId id: String) -> TaskDTO? {
+        cache[id]
+    }
+
+    // MARK: - Fetching
+
+    func fetch() async {
+        guard let model else { return }
+        if state.value == nil { state = .loading }
+        do {
+            switch segment {
+            case .today, .all:
+                let response = try await model.api.tasks(view: "all")
+                remember(response.tasks)
+                state = .loaded(response.tasks)
+            case .upcoming:
+                async let upcomingCall = model.api.tasks(view: "upcoming")
+                async let inboxCall = model.api.tasks(view: "inbox")
+                let (upcoming, inbox) = try await (upcomingCall, inboxCall)
+                remember(upcoming.tasks)
+                remember(inbox.tasks)
+                noDateTasks = inbox.tasks.filter { $0.status == .open }
+                state = .loaded(upcoming.tasks)
+            case .done:
+                let response = try await model.api.tasks(view: "done")
+                remember(response.tasks)
+                state = .loaded(response.tasks)
+            }
+        } catch {
+            model.handle(error)
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    func fetchGoals() async {
+        guard let model else { return }
+        if let response = try? await model.api.goals() {
+            goals = response.goals
+        }
+    }
+
+    /// Refetch a single task by scanning the list views (the API has no
+    /// GET /tasks/:id). Checks "all" first, then "done".
+    @discardableResult
+    func refreshTask(id: String) async -> TaskDTO? {
+        guard let model else { return nil }
+        do {
+            let all = try await model.api.tasks(view: "all")
+            remember(all.tasks)
+            if let found = all.tasks.first(where: { $0.id == id }) { return found }
+            let done = try await model.api.tasks(view: "done")
+            remember(done.tasks)
+            return done.tasks.first { $0.id == id }
+        } catch {
+            model.handle(error)
+            return nil
+        }
+    }
+
+    private func remember(_ tasks: [TaskDTO]) {
+        for task in tasks {
+            cache[task.id] = task
+        }
+    }
+
+    // MARK: - Derived groups
+
+    private func matchesSearch(_ task: TaskDTO) -> Bool {
+        searchText.isEmpty || task.title.localizedCaseInsensitiveContains(searchText)
+    }
+
+    private func priorityRank(_ priority: TaskPriority) -> Int {
+        switch priority {
+        case .high: 0
+        case .medium: 1
+        case .low: 2
+        }
+    }
+
+    private func taskSort(_ a: TaskDTO, _ b: TaskDTO) -> Bool {
+        if a.priority != b.priority { return priorityRank(a.priority) < priorityRank(b.priority) }
+        if a.dueTime != b.dueTime { return (a.dueTime ?? "~") < (b.dueTime ?? "~") }
+        return a.sortOrder < b.sortOrder
+    }
+
+    /// Today segment: open tasks past their due date, pinned on top.
+    var overdueTasks: [TaskDTO] {
+        guard let tasks = state.value else { return [] }
+        let today = todayKey
+        return tasks
+            .filter { $0.status == .open && ($0.dueDate ?? today) < today && matchesSearch($0) }
+            .sorted { ($0.dueDate ?? "") != ($1.dueDate ?? "") ? ($0.dueDate ?? "") < ($1.dueDate ?? "") : taskSort($0, $1) }
+    }
+
+    /// Today segment: tasks due today (open first, then completed).
+    var todayTasks: [TaskDTO] {
+        guard let tasks = state.value else { return [] }
+        let today = todayKey
+        let due = tasks.filter { $0.status != .cancelled && $0.dueDate == today && matchesSearch($0) }
+        let open = due.filter { $0.status == .open }.sorted(by: taskSort)
+        let done = due.filter { $0.status == .done }.sorted(by: taskSort)
+        return open + done
+    }
+
+    /// Upcoming segment: "Tomorrow", weekday headers for the next 7 days,
+    /// then "Later" and "No date".
+    var upcomingGroups: [TaskGroup] {
+        guard let tasks = state.value else { return [] }
+        let today = todayKey
+        let open = tasks.filter { $0.status == .open && matchesSearch($0) }
+        var groups: [TaskGroup] = []
+        for offset in 1...7 {
+            let key = DayKeyMath.addDays(today, offset)
+            let dayTasks = open.filter { $0.dueDate == key }.sorted(by: taskSort)
+            guard !dayTasks.isEmpty else { continue }
+            let title = offset == 1 ? "Tomorrow" : TaskDateLabels.weekdayLabel(for: key)
+            groups.append(TaskGroup(id: key, title: title, tasks: dayTasks))
+        }
+        let horizon = DayKeyMath.addDays(today, 7)
+        let later = open
+            .filter { ($0.dueDate ?? "") > horizon }
+            .sorted { ($0.dueDate ?? "") != ($1.dueDate ?? "") ? ($0.dueDate ?? "") < ($1.dueDate ?? "") : taskSort($0, $1) }
+        if !later.isEmpty {
+            groups.append(TaskGroup(id: "later", title: "Later", tasks: later))
+        }
+        let noDate = noDateTasks.filter { matchesSearch($0) }.sorted(by: taskSort)
+        if !noDate.isEmpty {
+            groups.append(TaskGroup(id: "no-date", title: "No date", tasks: noDate))
+        }
+        return groups
+    }
+
+    /// All segment: everything non-cancelled, by due date with nil last.
+    var allTasks: [TaskDTO] {
+        guard let tasks = state.value else { return [] }
+        return tasks
+            .filter { $0.status != .cancelled && matchesSearch($0) }
+            .sorted { a, b in
+                switch (a.dueDate, b.dueDate) {
+                case let (.some(l), .some(r)) where l != r: l < r
+                case (.some, .none): true
+                case (.none, .some): false
+                default: taskSort(a, b)
+                }
+            }
+    }
+
+    /// Done segment: most recently completed first.
+    var doneTasks: [TaskDTO] {
+        guard let tasks = state.value else { return [] }
+        return tasks
+            .filter { $0.status == .done && matchesSearch($0) }
+            .sorted { ($0.completedAt ?? "") > ($1.completedAt ?? "") }
+    }
+
+    // MARK: - Mutations
+
+    func toggleComplete(_ task: TaskDTO) async {
+        guard let model else { return }
+        do {
+            let updated = task.status == .done
+                ? try await model.api.uncompleteTask(id: task.id)
+                : try await model.api.completeTask(id: task.id)
+            cache[updated.id] = updated
+            actionError = nil
+            model.invalidateToday()
+            await fetch()
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+        }
+    }
+
+    func reschedule(_ task: TaskDTO, to dayKey: String) async {
+        guard let model else { return }
+        do {
+            let updated = try await model.api.patchTask(id: task.id, ["dueDate": .string(dayKey)])
+            cache[updated.id] = updated
+            actionError = nil
+            model.invalidateToday()
+            await fetch()
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+        }
+    }
+
+    func delete(_ task: TaskDTO) async {
+        guard let model else { return }
+        do {
+            _ = try await model.api.deleteTask(id: task.id)
+            cache[task.id] = nil
+            actionError = nil
+            model.invalidateToday()
+            await fetch()
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Shared date labels & instant parsing
+
+enum TaskDateLabels {
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE MMM d"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    private static let shortFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    private static let completedFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, HH:mm"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    /// "Friday Jul 12" for upcoming day headers.
+    static func weekdayLabel(for dayKey: String) -> String {
+        guard let date = DayKeyMath.date(from: dayKey) else { return dayKey }
+        return weekdayFormatter.string(from: date)
+    }
+
+    /// "Jul 7" for overdue captions.
+    static func shortLabel(for dayKey: String) -> String {
+        guard let date = DayKeyMath.date(from: dayKey) else { return dayKey }
+        return shortFormatter.string(from: date)
+    }
+
+    /// "Jul 9, 22:14" from an ISO-8601 instant string.
+    static func completedLabel(for instant: String) -> String? {
+        guard let date = InstantParser.date(from: instant) else { return nil }
+        return completedFormatter.string(from: date)
+    }
+}
+
+enum InstantParser {
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let plain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static func date(from string: String) -> Date? {
+        fractional.date(from: string) ?? plain.date(from: string)
+    }
+}

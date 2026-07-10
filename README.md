@@ -1,56 +1,42 @@
-# Welcome to your Expo app 👋
+# Jarvis
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Personal J.A.R.V.I.S.-style life assistant: 12 Week Year planning, daily scoring, habit tracking, and an AI companion. Single-user, online-only.
 
-## Get started
+Full product + technical spec: [docs/spec.md](docs/spec.md).
 
-1. Install dependencies
+## Layout
 
-   ```bash
-   npm install
-   ```
+- `apps/api` — Next.js API (App Router route handlers only), deployed on Vercel. Postgres on NeonDB via Drizzle.
+- `apps/app` — SwiftUI multiplatform app (iPhone iOS 26 + macOS 26), generated with XcodeGen.
 
-2. Start the app
+## Development
 
-   ```bash
-   npx expo start
-   ```
+### API
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+pnpm install
+pnpm --filter api dev            # http://localhost:3000 (use `ek run` for secrets)
+pnpm --filter api test           # vitest (scoring engine, daykey math, recurrence)
+pnpm --filter api db:generate    # generate SQL migration from schema changes
+pnpm --filter api db:migrate     # apply migrations (needs DATABASE_URL)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Secrets are managed with Enkryptify (`ek run -- pnpm --filter api dev`). See `.env.example` for the full list. NeonDB: `main` branch = prod, `dev` branch = local development.
 
-### Other setup steps
+### App
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```sh
+brew install xcodegen
+cd apps/app
+xcodegen generate
+open Jarvis.xcodeproj
+```
 
-## Learn more
+The `.xcodeproj` is generated and gitignored — all project config lives in `apps/app/project.yml`. Debug builds point at `http://localhost:3000` (see `apps/app/Config/Debug.xcconfig`; use the Mac's LAN IP for a physical iPhone). Release points at the Vercel deployment.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Build stages
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+1. **Stage 1 — Core tracking**: auth, tasks (subtasks + recurrence), habits (daily / N×day / N×week with pace scoring), Today page with daily score + mood.
+2. **Stage 2 — 12 Week Year + AI onboarding**: vision, blocks, goals, tactics, AI interview → plan generation.
+3. **Stage 3 — Chat agent + briefings**: tool-use chat with confirmable action cards, morning briefing.
+4. **Stage 4 — Reviews & body**: weekly reviews, week-13 retrospective, metrics, progress photos, trends.
