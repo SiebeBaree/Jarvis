@@ -13,8 +13,9 @@ struct OnboardingFlowView: View {
     @State private var confirmingAbandon = false
 
     /// `forceFresh` skips the resume probe (Settings → Restart interview).
-    init(forceFresh: Bool = false) {
-        _store = State(initialValue: OnboardingStore(forceFresh: forceFresh))
+    /// `kind` is the interview kind ("onboarding" or "reonboarding").
+    init(forceFresh: Bool = false, kind: String = "onboarding") {
+        _store = State(initialValue: OnboardingStore(forceFresh: forceFresh, kind: kind))
     }
 
     var body: some View {

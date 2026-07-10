@@ -23,5 +23,15 @@ struct JarvisApp: App {
         #if os(macOS)
         .defaultSize(width: 1100, height: 760)
         #endif
+
+        #if os(macOS)
+        // ⌘, — the standard macOS Settings window (§B1).
+        Settings {
+            NavigationStack { SettingsView() }
+                .environment(model)
+                .preferredColorScheme(colorScheme)
+                .frame(minWidth: 480, minHeight: 520)
+        }
+        #endif
     }
 }

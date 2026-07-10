@@ -51,6 +51,8 @@ final class OnboardingStore {
     ]
 
     let forceFresh: Bool
+    /// Interview kind sent to the server ("onboarding" or "reonboarding").
+    let kind: String
 
     private(set) var phase: Phase
     private(set) var sessionId: String?
@@ -71,8 +73,9 @@ final class OnboardingStore {
     private var pendingAnswers: [InterviewAnswerDTO] = []
     private var model: AppModel?
 
-    init(forceFresh: Bool = false) {
+    init(forceFresh: Bool = false, kind: String = "onboarding") {
         self.forceFresh = forceFresh
+        self.kind = kind
         // forceFresh skips the resume probe and always lands on the intro.
         self.phase = forceFresh ? .landing : .probing
     }
@@ -150,7 +153,7 @@ final class OnboardingStore {
             if forceFresh, let active = try? await model.api.interviewActive() {
                 _ = try? await model.api.interviewAbandon(sessionId: active.sessionId)
             }
-            let response = try await model.api.interviewStart(kind: "onboarding")
+            let response = try await model.api.interviewStart(kind: kind)
             sessionId = response.sessionId
             transcript = []
             enter(response.round)

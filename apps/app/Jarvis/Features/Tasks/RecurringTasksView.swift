@@ -215,6 +215,7 @@ private struct TemplateEditorSheet: View {
     @State private var goalId: String?
     @State private var hasTime = false
     @State private var dueTime: Date = .now
+    @State private var showInReviewWeek = false
     @State private var rule = RecurrenceRuleDTO(freq: "daily", interval: 1)
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -245,6 +246,8 @@ private struct TemplateEditorSheet: View {
                     if hasTime {
                         DatePicker("At", selection: $dueTime, displayedComponents: .hourAndMinute)
                     }
+
+                    Toggle("Show during review week", isOn: $showInReviewWeek)
                 }
 
                 Section {
@@ -279,6 +282,7 @@ private struct TemplateEditorSheet: View {
                 title = template.title
                 priority = template.priority
                 goalId = template.goalId
+                showInReviewWeek = template.showInReviewWeek ?? false
                 rule = template.rule
                 if let time = template.dueTime {
                     hasTime = true
@@ -308,6 +312,7 @@ private struct TemplateEditorSheet: View {
                     "priority": .string(priority.rawValue),
                     "goalId": goalId.map { .string($0) } ?? .null,
                     "rule": rule.jsonValue,
+                    "showInReviewWeek": .bool(showInReviewWeek),
                 ]
                 if hasTime {
                     let components = Calendar.current.dateComponents([.hour, .minute], from: dueTime)

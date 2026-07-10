@@ -10,6 +10,8 @@ struct TaskEditorView: View {
 
     let goals: [GoalDTO]
     let defaultDueDate: String
+    /// Prefills the title field (quick-add "More…" hands off the typed text).
+    var initialTitle: String? = nil
     var onSaved: () async -> Void
 
     @State private var title = ""
@@ -108,6 +110,9 @@ struct TaskEditorView: View {
                 if isOn { hasDueDate = true }
             }
             .onAppear {
+                if let initialTitle, !initialTitle.isEmpty {
+                    title = initialTitle
+                }
                 if let date = DayKeyMath.date(from: defaultDueDate) {
                     dueDate = date
                 }

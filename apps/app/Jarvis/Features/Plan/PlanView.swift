@@ -25,6 +25,8 @@ struct PlanView: View {
     @State private var showOnboarding = false
     @State private var showManualBlock = false
     @State private var showVision = false
+    @State private var showWeeklyReview = false
+    @State private var showBlockRetro = false
     @State private var goalRoute: GoalRoute?
     @State private var weekRoute: WeekRoute?
 
@@ -61,6 +63,8 @@ struct PlanView: View {
             WeekDetailView(store: store, weekNumber: route.weekNumber)
         }
         .onboardingInterviewCover(isPresented: $showOnboarding)
+        .reviewFlowCover(isPresented: $showWeeklyReview, kind: .weekly)
+        .reviewFlowCover(isPresented: $showBlockRetro, kind: .block)
         .sheet(isPresented: $showManualBlock) {
             ManualBlockSheet(store: store)
         }
@@ -94,6 +98,9 @@ struct PlanView: View {
                         blockHeader(block, response: response)
                     }
                     goalsSection(response)
+                    if !response.isUpcoming, response.isReviewWeek {
+                        blockRetroCard
+                    }
                     if !response.isUpcoming, let weekNumber = response.weekNumber {
                         thisWeekCard(block, weekNumber: weekNumber, response: response)
                     }
@@ -316,9 +323,34 @@ struct PlanView: View {
                     }
                 }
             }
+
+            Button("Weekly review") { showWeeklyReview = true }
+                .buttonStyle(.jarvisGhost)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()
+    }
+
+    /// Review week (§B3): prominent retrospective launcher above This Week.
+    private var blockRetroCard: some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            Text("Block retrospective")
+                .font(.headlineJ)
+                .foregroundStyle(Color.accentPrimary)
+            Text("Review week — close out this block")
+                .font(.subheadJ)
+                .foregroundStyle(Color.textSecondary)
+            Button("Start retrospective") { showBlockRetro = true }
+                .buttonStyle(.jarvisPrimary)
+                .padding(.top, Space.xs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Space.lg)
+        .background(Color.accentSubtle.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+                .strokeBorder(Color.accentPrimary.opacity(0.35), lineWidth: 0.5),
+        )
     }
 
     /// "78 ▲6" — this week's avg vs the previous week (▲ success /

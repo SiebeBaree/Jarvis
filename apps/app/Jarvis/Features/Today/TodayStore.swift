@@ -28,6 +28,7 @@ final class TodayStore {
         do {
             let payload = try await model.api.today()
             day = .loaded(payload)
+            model.updatePlanContext(weekNumber: payload.weekNumber, isReviewWeek: payload.isReviewWeek)
         } catch {
             model.handle(error)
             if day.value == nil {
@@ -52,11 +53,10 @@ final class TodayStore {
         await run { try await $0.patchTask(id: task.id, ["dueDate": .string(dayKey)]) }
     }
 
-    func createQuickTask(title: String) async {
-        guard let payload else { return }
+    func createQuickTask(title: String, dueDate: String?, priority: TaskPriority) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        await run { try await $0.createTask(TaskCreateRequest(title: trimmed, dueDate: payload.dayKey)) }
+        await run { try await $0.createTask(TaskCreateRequest(title: trimmed, dueDate: dueDate, priority: priority)) }
     }
 
     // MARK: - Habits

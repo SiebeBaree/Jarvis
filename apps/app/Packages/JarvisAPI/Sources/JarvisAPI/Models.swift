@@ -108,6 +108,9 @@ public struct RecurrenceTemplateDTO: Codable, Sendable, Identifiable, Equatable 
     public let startDate: DayKey
     public let endDate: DayKey?
     public let pausedAt: String?
+    /// Whether occurrences still appear during review week. Optional so
+    /// payloads from servers predating the field decode; treat nil as false.
+    public let showInReviewWeek: Bool?
 }
 
 public struct TemplateListResponse: Codable, Sendable {
@@ -263,6 +266,9 @@ public struct DayPayload: Codable, Sendable {
     public let habits: [HabitTodayEntryDTO]
     public let mood: MoodDTO?
     public let yesterdayMoodMissing: Bool
+    /// Number of paused recurring tasks today. Optional so payloads from
+    /// servers predating the field still decode (absent key → nil; treat as 0).
+    public let pausedTaskCount: Int?
 }
 
 public struct ScorePointDTO: Codable, Sendable, Identifiable, Equatable {

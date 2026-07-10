@@ -24,9 +24,10 @@ struct WeekDetailView: View {
     private var block: BlockDTO? { store.content.value?.block }
     private var weekStart: DayKey? { block.map { PlanDisplay.weekStart(block: $0, weekNumber: weekNumber) } }
     private var weekEnd: DayKey? { block.map { PlanDisplay.weekEnd(block: $0, weekNumber: weekNumber) } }
-    /// Tactic toggles are only editable for the current or past weeks.
+    /// Tactic toggles are only editable for the current week — past weeks
+    /// are a read-only record.
     private var isEditable: Bool {
-        store.currentWeekNumber.map { weekNumber <= $0 } ?? false
+        store.currentWeekNumber.map { weekNumber == $0 } ?? false
     }
 
     var body: some View {

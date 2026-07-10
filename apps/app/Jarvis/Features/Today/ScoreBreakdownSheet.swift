@@ -124,7 +124,9 @@ struct ScoreBreakdownSheet: View {
                 habitsCard(payload)
                 feelCard(payload)
                 sevenDayCard
-                Text("Weights: \(Int(weights.tasks))/\(Int(weights.habits))/\(Int(weights.feel))")
+                Text(payload.isReviewWeek
+                    ? "Review week scoring — tasks paused; habits and feel renormalized."
+                    : "Weights: \(Int(weights.tasks))/\(Int(weights.habits))/\(Int(weights.feel))")
                     .font(.captionJ)
                     .foregroundStyle(Color.textTertiary)
             }

@@ -132,6 +132,74 @@ public actor APIClient {
         }
     }
 
+    /// Builds an authorized request without sending it, plus the session to
+    /// send it on. Used by extension files that own the transport themselves
+    /// (SSE streaming in Endpoints+Chat).
+    func makeRequest(
+        method: String,
+        path: String,
+        query: [URLQueryItem] = [],
+        body: (some Encodable & Sendable)? = nil as EmptyBody?,
+    ) throws -> (URLRequest, URLSession) {
+        var components = URLComponents(
+            url: baseURL.appending(path: "/api/v1" + path),
+            resolvingAgainstBaseURL: false,
+        )!
+        if !query.isEmpty { components.queryItems = query }
+
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try encoder.encode(body)
+        }
+        return (request, session)
+    }
+
+    /// Like send(), but with a raw (non-JSON) request body — photo uploads.
+    func upload<T: Decodable & Sendable>(
+        _ type: T.Type,
+        _ path: String,
+        query: [URLQueryItem] = [],
+        data body: Data,
+        contentType: String,
+    ) async throws -> T {
+        var (request, session) = try makeRequest(method: "POST", path: path, query: query, body: nil as EmptyBody?)
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIClientError.network(underlying: error.localizedDescription)
+        }
+
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 { throw APIClientError.unauthorized }
+        guard (200..<300).contains(status) else {
+            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
+                throw APIClientError.api(
+                    code: envelope.error.code,
+                    message: envelope.error.message,
+                    status: status,
+                )
+            }
+            throw APIClientError.api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+        }
+
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw APIClientError.decoding(underlying: String(describing: error))
+        }
+    }
+
     func get<T: Decodable & Sendable>(_ type: T.Type, _ path: String, query: [URLQueryItem] = []) async throws -> T {
         try await send(type, method: "GET", path: path, query: query, body: nil as EmptyBody?)
     }

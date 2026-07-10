@@ -15,9 +15,26 @@ struct TodayView: View {
     @State private var showCompleted = false
     @State private var isAddingTask = false
     @State private var newTaskTitle = ""
+    @State private var quickDueChoice: QuickDueChoice = .today
+    @State private var quickPriority: TaskPriority = .medium
+    @State private var showQuickEditor = false
+    @State private var quickEditorGoals: [GoalDTO] = []
     @State private var detailRoute: HabitDetailRoute?
     @State private var showPlanOnboarding = false
     @FocusState private var addTaskFocused: Bool
+
+    /// Due-date choice for the quick-add composer chips.
+    private enum QuickDueChoice {
+        case today, tomorrow, none
+
+        var label: String {
+            switch self {
+            case .today: "Today"
+            case .tomorrow: "Tomorrow"
+            case .none: "No date"
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -41,6 +58,18 @@ struct TodayView: View {
                 }
                 .accessibilityLabel("Settings")
             }
+            #if os(iOS)
+            // Trends (and Body inside it) live behind this on iPhone;
+            // macOS reaches them via the sidebar.
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink {
+                    TrendsView()
+                } label: {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                }
+                .accessibilityLabel("Trends")
+            }
+            #endif
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack { SettingsView() }
@@ -51,6 +80,16 @@ struct TodayView: View {
         .sheet(isPresented: $showBreakdown) {
             if let payload = store.payload {
                 ScoreBreakdownSheet(payload: payload)
+            }
+        }
+        .sheet(isPresented: $showQuickEditor) {
+            TaskEditorView(
+                goals: quickEditorGoals,
+                defaultDueDate: store.payload?.dayKey ?? DayKeyMath.todayKey(),
+                initialTitle: newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            ) {
+                newTaskTitle = ""
+                isAddingTask = false
             }
         }
         .navigationDestination(item: $detailRoute) { route in
@@ -86,12 +125,22 @@ struct TodayView: View {
                 if payload.block == nil {
                     planSetupBanner
                 }
+                BriefingSlot(payload: payload) // Stage 3: morning briefing card
                 scoreHeader(payload)
                 moodSection(payload)
+                WeeklyReviewSlot(payload: payload) // Stage 4: weekly review banner
+                WrapupSlot(payload: payload) // Stage 3: evening wrap-up banner
                 if !payload.overdueTasks.isEmpty {
                     overdueSection(payload)
                 }
-                tasksSection(payload)
+                if payload.isReviewWeek {
+                    reviewWeekTasksNote(payload)
+                    if !payload.tasksDue.isEmpty {
+                        tasksSection(payload)
+                    }
+                } else {
+                    tasksSection(payload)
+                }
                 habitsSection(payload)
             }
             .listRowSeparator(.hidden)
@@ -157,15 +206,21 @@ struct TodayView: View {
                     .foregroundStyle(Color.textTertiary)
             }
             if let block = payload.block, let weekNumber = payload.weekNumber {
-                Text(payload.isReviewWeek
-                    ? "Review Week · \(block.title)"
-                    : "Week \(weekNumber) · \(block.title)")
-                    .font(.captionJ)
-                    .foregroundStyle(payload.isReviewWeek ? Color.accentPrimary : Color.textSecondary)
-                    .padding(.horizontal, Space.sm)
-                    .padding(.vertical, 3)
-                    .background(payload.isReviewWeek ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
-                    .padding(.top, Space.xs)
+                Button {
+                    model.requestedSection = .plan
+                } label: {
+                    Text(payload.isReviewWeek
+                        ? "Review Week · \(block.title)"
+                        : "Week \(weekNumber) · \(block.title)")
+                        .font(.captionJ)
+                        .foregroundStyle(payload.isReviewWeek ? Color.accentPrimary : Color.textSecondary)
+                        .padding(.horizontal, Space.sm)
+                        .padding(.vertical, 3)
+                        .background(payload.isReviewWeek ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, Space.xs)
+                .accessibilityHint(Text("Opens the Plan tab"))
             }
         }
     }
@@ -191,6 +246,26 @@ struct TodayView: View {
             }
             .buttonStyle(.jarvisPrimary)
             .padding(.top, Space.xs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    // MARK: - Review week (tasks paused)
+
+    private func reviewWeekTasksNote(_ payload: DayPayload) -> some View {
+        let hidden = payload.pausedTaskCount ?? 0
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            Text("Review week — tasks are paused")
+                .font(.headlineJ)
+                .foregroundStyle(Color.textPrimary)
+            Text(
+                hidden > 0
+                    ? "\(hidden) scheduled task\(hidden == 1 ? "" : "s") hidden until the next block. Habits and mood keep scoring."
+                    : "Habits and mood keep scoring. Use this week to close out the block.",
+            )
+            .font(.subheadJ)
+            .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()
@@ -346,7 +421,7 @@ struct TodayView: View {
         let open = sortedOpenTasks(payload)
         let completed = payload.tasksDue.filter { $0.status == .done }
 
-        SectionHeader("Tasks")
+        SectionHeader(payload.isReviewWeek ? "Scheduled anyway" : "Tasks")
             .padding(.top, Space.sm)
 
         if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
@@ -371,7 +446,11 @@ struct TodayView: View {
             }
         }
 
-        addTaskRow
+        // Quick-add is hidden during review week — the server filters new
+        // tasks out of the paused list, so they would vanish on refresh.
+        if !payload.isReviewWeek {
+            addTaskRow
+        }
 
         if !completed.isEmpty {
             Button {
@@ -403,27 +482,39 @@ struct TodayView: View {
     @ViewBuilder
     private var addTaskRow: some View {
         if isAddingTask {
-            HStack(spacing: Space.md) {
-                Image(systemName: "circle")
-                    .font(.system(size: 22, weight: .light))
+            VStack(alignment: .leading, spacing: Space.sm) {
+                HStack(spacing: Space.md) {
+                    Image(systemName: "circle")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Color.textTertiary)
+                    TextField("Task title", text: $newTaskTitle)
+                        .font(.headlineJ)
+                        .textFieldStyle(.plain)
+                        .focused($addTaskFocused)
+                        .onSubmit { submitQuickTask() }
+                    Button("Cancel") {
+                        isAddingTask = false
+                        newTaskTitle = ""
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadJ)
                     .foregroundStyle(Color.textTertiary)
-                TextField("Task title", text: $newTaskTitle)
-                    .font(.headlineJ)
-                    .textFieldStyle(.plain)
-                    .focused($addTaskFocused)
-                    .onSubmit { submitQuickTask() }
-                Button("Cancel") {
-                    isAddingTask = false
-                    newTaskTitle = ""
                 }
-                .buttonStyle(.plain)
-                .font(.subheadJ)
-                .foregroundStyle(Color.textTertiary)
+                HStack(spacing: Space.sm) {
+                    quickDueChip
+                    quickPriorityChip
+                    Spacer(minLength: Space.sm)
+                    Button("More…") { openFullEditor() }
+                        .buttonStyle(.jarvisGhost)
+                }
+                .padding(.leading, 22 + Space.md)
             }
             .frame(minHeight: RowHeight.standard)
         } else {
             Button {
                 isAddingTask = true
+                quickDueChoice = .today
+                quickPriority = .medium
                 addTaskFocused = true
             } label: {
                 Text("+ Add task")
@@ -433,11 +524,72 @@ struct TodayView: View {
         }
     }
 
+    private var quickDueChip: some View {
+        Menu {
+            Button("Today") { quickDueChoice = .today }
+            Button("Tomorrow") { quickDueChoice = .tomorrow }
+            Button("None") { quickDueChoice = .none }
+        } label: {
+            HStack(spacing: Space.xs) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10))
+                Text(quickDueChoice.label)
+                    .font(.captionJ)
+            }
+            .foregroundStyle(Color.textSecondary)
+            .padding(.horizontal, Space.sm)
+            .padding(.vertical, 3)
+            .background(Color.bgSubtle, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Due date: \(quickDueChoice.label)")
+    }
+
+    private var quickPriorityChip: some View {
+        Menu {
+            Button("P1 High") { quickPriority = .high }
+            Button("P2 Medium") { quickPriority = .medium }
+            Button("P3 Low") { quickPriority = .low }
+        } label: {
+            PriorityFlag(quickPriority.flagLevel)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, 3)
+                .background(Color.bgSubtle, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Priority: \(quickPriority.flagLevel.label)")
+    }
+
+    /// "More…" hands the typed title to the full editor (goals fetched lazily).
+    private func openFullEditor() {
+        Task {
+            if let response = try? await model.api.goals() {
+                quickEditorGoals = response.goals
+            }
+            showQuickEditor = true
+        }
+    }
+
     private func submitQuickTask() {
         let title = newTaskTitle
+        let dueDate: String? = {
+            guard let dayKey = store.payload?.dayKey else { return nil }
+            switch quickDueChoice {
+            case .today: return dayKey
+            case .tomorrow: return DayKeyMath.addDays(dayKey, 1)
+            case .none: return nil
+            }
+        }()
+        let priority = quickPriority
         newTaskTitle = ""
         isAddingTask = false
-        Task { await store.createQuickTask(title: title) }
+        Task { await store.createQuickTask(title: title, dueDate: dueDate, priority: priority) }
     }
 
     private var heroEmptyState: some View {
@@ -462,9 +614,15 @@ struct TodayView: View {
 
         if payload.habits.isEmpty {
             if !payload.tasksDue.isEmpty || !payload.overdueTasks.isEmpty {
-                Text("No habits yet — create them in the Habits tab")
-                    .font(.bodyJ)
-                    .foregroundStyle(Color.textTertiary)
+                HStack(spacing: Space.sm) {
+                    Text("No habits yet — create them in the Habits tab")
+                        .font(.bodyJ)
+                        .foregroundStyle(Color.textTertiary)
+                    Button("Open Habits") {
+                        model.requestedSection = .habits
+                    }
+                    .buttonStyle(.jarvisGhost)
+                }
             }
         } else {
             let alsoAvailable = payload.habits.filter { isAlsoAvailable($0) }

@@ -16,12 +16,32 @@ final class AppModel {
     /// Bumped after any mutation so open screens (Today especially) refetch.
     private(set) var todayRevision = 0
 
+    /// Cross-tab navigation requests (week chip → Plan, empty states → Habits...).
+    /// MainShell consumes and clears it.
+    var requestedSection: AppSection?
+
+    /// Live block context for the macOS sidebar label; TodayStore updates it.
+    struct PlanContext: Equatable {
+        var weekNumber: Int?
+        var isReviewWeek: Bool
+    }
+
+    private(set) var planContext = PlanContext(weekNumber: nil, isReviewWeek: false)
+
+    /// True right after account creation — triggers the automatic first-run interview.
+    var needsFirstRunOnboarding = false
+
     init() {
         self.api = APIClient(baseURL: Config.apiBaseURL)
     }
 
     func invalidateToday() {
         todayRevision += 1
+    }
+
+    func updatePlanContext(weekNumber: Int?, isReviewWeek: Bool) {
+        let next = PlanContext(weekNumber: weekNumber, isReviewWeek: isReviewWeek)
+        if next != planContext { planContext = next }
     }
 
     // MARK: - Session lifecycle
@@ -53,6 +73,7 @@ final class AppModel {
         Keychain.saveToken(auth.token)
         await api.setToken(auth.token)
         let me = try await api.me()
+        needsFirstRunOnboarding = register // first run: account → interview (§B4)
         session = .loggedIn(me.user, me.settings)
     }
 

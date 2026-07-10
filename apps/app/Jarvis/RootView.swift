@@ -18,14 +18,27 @@ struct RootView: View {
     }
 }
 
-/// App sections. Chat (S3) is added later without reshuffling these.
 enum AppSection: String, CaseIterable, Identifiable {
     case today
     case tasks
     case habits
     case plan
+    case chat
+    case trends
+    case body
 
     var id: String { rawValue }
+
+    /// iPhone tab bar (Trends/Body live behind Today's toolbar there).
+    static let tabSections: [AppSection] = [.today, .tasks, .habits, .plan, .chat]
+
+    /// macOS sidebar shows everything, grouped.
+    static let sidebarGroups: [(title: String?, sections: [AppSection])] = [
+        (nil, [.today, .chat]),
+        ("Plan", [.plan]),
+        ("Track", [.tasks, .habits]),
+        ("Progress", [.trends, .body]),
+    ]
 
     var title: String {
         switch self {
@@ -33,6 +46,9 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .tasks: "Tasks"
         case .habits: "Habits"
         case .plan: "Plan"
+        case .chat: "Chat"
+        case .trends: "Trends"
+        case .body: "Body"
         }
     }
 
@@ -42,29 +58,60 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .tasks: "checklist"
         case .habits: "repeat"
         case .plan: "map"
+        case .chat: "bubble.left.and.text.bubble.right"
+        case .trends: "chart.line.uptrend.xyaxis"
+        case .body: "figure.arms.open"
         }
     }
 }
 
 struct MainShell: View {
+    @Environment(AppModel.self) private var model
     @State private var selection: AppSection = .today
+    @State private var showFirstRunOnboarding = false
 
     var body: some View {
+        shell
+            .onChange(of: model.requestedSection) { _, section in
+                if let section {
+                    selection = section
+                    model.requestedSection = nil
+                }
+            }
+            .task {
+                // First run (§B4): fresh account → the app IS the interview.
+                if model.needsFirstRunOnboarding {
+                    model.needsFirstRunOnboarding = false
+                    showFirstRunOnboarding = true
+                }
+            }
+            .onboardingInterviewCover(isPresented: $showFirstRunOnboarding)
+    }
+
+    @ViewBuilder
+    private var shell: some View {
         #if os(macOS)
         NavigationSplitView {
             List(selection: $selection) {
-                Section {
-                    ForEach(AppSection.allCases) { section in
-                        Label(section.title, systemImage: section.icon)
-                            .tag(section)
+                ForEach(Array(AppSection.sidebarGroups.enumerated()), id: \.offset) { _, group in
+                    Section {
+                        ForEach(group.sections) { section in
+                            Label(sidebarTitle(for: section), systemImage: section.icon)
+                                .tag(section)
+                        }
+                    } header: {
+                        if let title = group.title {
+                            Text(title)
+                                .font(.captionJ)
+                                .foregroundStyle(Color.textSecondary)
+                        }
                     }
-                } header: {
-                    Text("Jarvis")
-                        .font(.captionJ)
-                        .foregroundStyle(Color.textSecondary)
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .safeAreaInset(edge: .bottom) {
+                settingsFooter
+            }
         } detail: {
             NavigationStack {
                 detailView(for: selection)
@@ -72,9 +119,11 @@ struct MainShell: View {
             .frame(minWidth: 640)
         }
         .background(Color.bgCanvas)
+        .background(sectionShortcuts)
+        .chatSlideOver() // ⇧⌘J panel, available from every screen
         #else
         TabView(selection: $selection) {
-            ForEach(AppSection.allCases) { section in
+            ForEach(AppSection.tabSections) { section in
                 NavigationStack {
                     detailView(for: section)
                 }
@@ -85,6 +134,39 @@ struct MainShell: View {
         #endif
     }
 
+    #if os(macOS)
+    /// "Plan · Week 7" / "Plan · Review Week" — live from the today payload.
+    private func sidebarTitle(for section: AppSection) -> String {
+        guard section == .plan else { return section.title }
+        if model.planContext.isReviewWeek { return "Plan · Review Week" }
+        if let week = model.planContext.weekNumber { return "Plan · Week \(week)" }
+        return section.title
+    }
+
+    private var settingsFooter: some View {
+        SidebarSettingsRow()
+            .padding(.horizontal, Space.sm)
+            .padding(.bottom, Space.sm)
+    }
+
+    /// ⌘1–⌘5 jump to the main sections (spec §B1).
+    private var sectionShortcuts: some View {
+        Group {
+            shortcutButton(.today, "1")
+            shortcutButton(.chat, "2")
+            shortcutButton(.plan, "3")
+            shortcutButton(.tasks, "4")
+            shortcutButton(.habits, "5")
+        }
+        .hidden()
+    }
+
+    private func shortcutButton(_ section: AppSection, _ key: KeyEquivalent) -> some View {
+        Button(section.title) { selection = section }
+            .keyboardShortcut(key, modifiers: .command)
+    }
+    #endif
+
     @ViewBuilder
     private func detailView(for section: AppSection) -> some View {
         switch section {
@@ -92,6 +174,35 @@ struct MainShell: View {
         case .tasks: TasksView()
         case .habits: HabitsView()
         case .plan: PlanView()
+        case .chat: ChatView()
+        case .trends: TrendsView()
+        case .body: BodyView()
         }
     }
 }
+
+#if os(macOS)
+/// Settings pinned to the sidebar bottom (§B1); ⌘, comes from the Settings scene.
+private struct SidebarSettingsRow: View {
+    @State private var showSettings = false
+
+    var body: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Label("Settings", systemImage: "gearshape")
+                .font(.subheadJ)
+                .foregroundStyle(Color.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, Space.xs)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showSettings) {
+            NavigationStack { SettingsView() }
+                .frame(minWidth: 480, minHeight: 520)
+        }
+    }
+}
+#endif
