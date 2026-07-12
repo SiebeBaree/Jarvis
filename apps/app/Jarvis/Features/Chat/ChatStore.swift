@@ -36,6 +36,10 @@ final class ChatStore {
     private(set) var isLoadingConversation = false
     var input = ""
 
+    /// Kind used when the next send creates a NEW conversation
+    /// ("seeding" for the setup wizard's get-to-know-you chat).
+    var newConversationKind: String?
+
     /// Last user text whose stream failed — powers the retry affordance.
     private(set) var retryText: String?
     /// Action ids with a confirm/reject request in flight.
@@ -70,7 +74,12 @@ final class ChatStore {
             var assistantItemId: String?
             var toolStatusIds: [String] = []
             do {
-                for try await event in model.api.chatStream(conversationId: conversationId, message: text) {
+                let kind = conversationId == nil ? newConversationKind : nil
+                for try await event in model.api.chatStream(
+                    conversationId: conversationId,
+                    message: text,
+                    kind: kind,
+                ) {
                     switch event {
                     case .meta(let cid):
                         conversationId = cid

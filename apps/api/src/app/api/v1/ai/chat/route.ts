@@ -6,10 +6,13 @@
 //   message_done  → {"messageId": "...", "conversationId": "..."}
 //   error         → {"code": "...", "message": "..."} (stream then closes)
 
+import { after } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { conversations } from "@/db/schema";
 import { runAgentTurn } from "@/lib/ai/agent";
+import { SEEDING_INSTRUCTIONS } from "@/lib/ai/context";
+import { extractMemories } from "@/lib/ai/memory";
 import type { AITask } from "@/lib/ai/tiers";
 import { requireAuth } from "@/lib/auth";
 import { ApiError, handler, parseBody } from "@/lib/http";
@@ -20,6 +23,7 @@ export const maxDuration = 180; // agent turns can chain several model calls
 
 const KIND_TASKS: Record<string, AITask> = {
   chat: "chat",
+  seeding: "seeding",
   weekly_review: "weekly_review",
   block_review: "block_review",
 };
@@ -38,7 +42,7 @@ export const POST = handler(async (request: Request) => {
   } else {
     const [created] = await db
       .insert(conversations)
-      .values({ userId: ctx.userId, kind: "chat" })
+      .values({ userId: ctx.userId, kind: body.kind ?? "chat" })
       .returning();
     if (!created) throw new ApiError(500, "internal_error", "Could not create conversation");
     conversation = created;
@@ -46,9 +50,12 @@ export const POST = handler(async (request: Request) => {
 
   const task: AITask = KIND_TASKS[conversation.kind] ?? "chat";
 
-  // Review conversations get a seed prompt (built concurrently in @/lib/reviews).
+  // Seeding conversations get their protocol; reviews get a computed seed
+  // prompt (built concurrently in @/lib/reviews).
   let extraInstructions: string | undefined;
-  if (conversation.kind !== "chat") {
+  if (conversation.kind === "seeding") {
+    extraInstructions = SEEDING_INSTRUCTIONS;
+  } else if (conversation.kind !== "chat") {
     try {
       const { buildReviewSeed } = await import("@/lib/reviews");
       extraInstructions = (await buildReviewSeed(conversation, ctx.settings)) || undefined;
@@ -86,6 +93,9 @@ export const POST = handler(async (request: Request) => {
           },
         );
         send("message_done", { messageId: assistantMessageId, conversationId });
+        // Learn from every conversation: extraction runs after the response
+        // finishes and never affects the turn.
+        after(() => extractMemories(userId, conversationId, settings.aiOverrides));
       } catch (error) {
         try {
           if (error instanceof ApiError) {

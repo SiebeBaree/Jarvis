@@ -41,3 +41,34 @@ conscious v1 simplification, not an oversight. Candidates for a v1.1 polish pass
 | SSE maxDuration | 180 s (spec said 120) to accommodate deep-tier review turns | Deliberate |
 | Codex auth | `codex_oauth` mode not implemented; api_key with automatic fallback plumbing in place | Flagged experiment; OpenAI API works |
 | Code duplication | ReviewChatView duplicates a minimal action card; ScoreBands mirrors PlanDisplay helpers | Flagged for a /simplify pass |
+
+## 2026-07-12 redesign — "You author, AI knows you"
+
+Product pivot after the first real onboarding run (interview produced a plan
+of the co-founder's commercial tasks; no way to correct it; personal
+improvement areas never asked about). Decisions confirmed with the user:
+
+- **AI-generated plans removed entirely.** `lib/ai/interview.ts`,
+  `lib/ai/apply-plan.ts`, all `/ai/interview/*` routes, and the Swift
+  Onboarding feature are deleted. The user authors areas/blocks/goals/habits
+  in a new manual **Setup Wizard** (`Features/Setup/`). The `interview_sessions`
+  table remains for history but nothing reads or writes it.
+- **Seeding conversations** (`conversation_kind = 'seeding'`): a plan-free
+  get-to-know-you chat launched from the wizard; the model saves memories via
+  the inline `save_memory` tool and is instructed to never propose plan items.
+- **Growing AI memory** (`memories` table): one durable fact per row, seven
+  fixed categories. Auto-extraction runs after every chat turn via
+  `next/server after()` (`lib/ai/memory.ts`), best-effort. Full CRUD at
+  `/memories`; Swift Memory screen under Settings → "What J.A.R.V.I.S. knows".
+  `user_profile` is legacy: still shown in context when present, never written.
+- **Improvement areas + weekly photo check-ins** (`improvement_areas`,
+  `area_checkins`): one photo per area per ISO week (weekKey = Monday),
+  private Vercel Blob, AI vision commentary generated async after upload
+  (`lib/ai/checkin-commentary.ts`, deep tier). Weekly prompt is an in-app
+  Today card (no push). Check-ins deliberately do NOT affect the daily score.
+- **Account reset**: `POST /account/reset` (confirm literal required) wipes
+  all domain rows + blobs, keeps users/sessions/settings. Settings → Danger
+  zone; re-runs the setup wizard afterwards.
+- Scoring, mood (one 0–100/day), Trends, Tasks, Habits, Body are unchanged.
+- E2E-verified 2026-07-12 (wizard flows, check-in upload + vision commentary,
+  seeding memories, post-turn extraction, memory-grounded answers, reset).

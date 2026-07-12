@@ -4,14 +4,13 @@ import SwiftUI
 
 /// Vision (§B3): document-like page — the vision statement (editable via a
 /// sheet), plus per-area aspiration cards (Stage 2-lite: not yet linked).
-/// Empty state routes into the onboarding interview or manual writing.
+/// You write your own vision; the empty state opens the editor.
 struct VisionView: View {
     let store: PlanStore
 
     @Environment(AppModel.self) private var model
 
     @State private var showEditor = false
-    @State private var showInterview = false
 
     private var vision: VisionDTO? { store.visionContent.value?.vision }
     private var hasVision: Bool {
@@ -45,7 +44,6 @@ struct VisionView: View {
         .sheet(isPresented: $showEditor) {
             VisionEditorSheet(store: store, initial: vision?.content ?? "")
         }
-        .onboardingInterviewCover(isPresented: $showInterview)
         .task {
             await store.loadVision()
         }
@@ -114,18 +112,15 @@ struct VisionView: View {
             Text("No vision yet")
                 .font(.title2J)
                 .foregroundStyle(Color.textPrimary)
-            Text("Your vision comes from the onboarding interview.")
+            Text("Describe your dream life in your own words — J.A.R.V.I.S. reads it for context, but you write it.")
                 .font(.bodyJ)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
-            Button("Start interview") {
-                showInterview = true
-            }
-            .buttonStyle(.jarvisPrimary)
-            Button("Write manually") {
+                .frame(maxWidth: 420)
+            Button("Write your vision") {
                 showEditor = true
             }
-            .buttonStyle(.jarvisGhost)
+            .buttonStyle(.jarvisPrimary)
         }
         .padding(Space.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

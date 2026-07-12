@@ -1,6 +1,6 @@
 import Foundation
 
-// Stage 2 endpoints: vision, blocks, tactics, interview.
+// Stage 2 endpoints: vision, blocks, tactics.
 
 private struct VisionPutRequest: Encodable, Sendable {
     let content: String
@@ -20,14 +20,6 @@ private struct TacticCreateRequest: Encodable, Sendable {
 
 private struct TacticWeekRequest: Encodable, Sendable {
     let done: Bool
-}
-
-private struct InterviewStartRequest: Encodable, Sendable {
-    let kind: String
-}
-
-private struct InterviewAnswersRequest: Encodable, Sendable {
-    let answers: [InterviewAnswerDTO]
 }
 
 extension APIClient {
@@ -91,31 +83,5 @@ extension APIClient {
             "/tactics/\(id)/weeks/\(weekNumber)",
             body: TacticWeekRequest(done: done),
         )
-    }
-
-    // Interview
-    public func interviewStart(kind: String = "onboarding") async throws -> InterviewStartResponse {
-        try await post(InterviewStartResponse.self, "/ai/interview/start", body: InterviewStartRequest(kind: kind))
-    }
-
-    /// Throws APIClientError.api(status: 404) when there is no resumable session.
-    public func interviewActive() async throws -> ActiveInterviewResponse {
-        try await get(ActiveInterviewResponse.self, "/ai/interview/active")
-    }
-
-    public func interviewAnswer(sessionId: String, answers: [InterviewAnswerDTO]) async throws -> AnswerRoundResponse {
-        try await post(
-            AnswerRoundResponse.self,
-            "/ai/interview/\(sessionId)/answer",
-            body: InterviewAnswersRequest(answers: answers),
-        )
-    }
-
-    public func interviewAbandon(sessionId: String) async throws -> OkResponse {
-        try await post(OkResponse.self, "/ai/interview/\(sessionId)/abandon")
-    }
-
-    public func interviewApply(sessionId: String, _ request: ApplyPlanRequest) async throws -> ApplyPlanResponse {
-        try await post(ApplyPlanResponse.self, "/ai/interview/\(sessionId)/apply", body: request)
     }
 }

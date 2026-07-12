@@ -22,6 +22,14 @@ struct ConversationListView: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink {
+                            MemoryView()
+                        } label: {
+                            Image(systemName: "brain")
+                        }
+                        .accessibilityLabel("What J.A.R.V.I.S. knows")
+                    }
                 }
         }
         .task { await load() }

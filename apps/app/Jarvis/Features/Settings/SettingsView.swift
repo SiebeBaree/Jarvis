@@ -11,8 +11,10 @@ struct SettingsView: View {
     @AppStorage("appearanceMode") private var appearanceMode = "system"
     @State private var confirmingSignOut = false
     @State private var isSigningOut = false
-    @State private var confirmingRestartInterview = false
-    @State private var showRestartInterview = false
+    @State private var showSetupWizard = false
+    @State private var confirmingReset = false
+    @State private var isResetting = false
+    @State private var resetError: String?
 
     var body: some View {
         Form {
@@ -20,6 +22,8 @@ struct SettingsView: View {
             appearanceSection
             scoringSection
             planSection
+            jarvisSection
+            dangerSection
             aboutSection
         }
         .formStyle(.grouped)
@@ -117,30 +121,70 @@ struct SettingsView: View {
         Section("Plan") {
             NavigationLink("Areas") { AreasEditorView() }
             NavigationLink("Goals") { GoalsEditorView() }
-            Button("Restart onboarding interview") {
-                confirmingRestartInterview = true
+            Button("Run the setup wizard") {
+                showSetupWizard = true
             }
+            .setupWizardCover(isPresented: $showSetupWizard)
+        }
+    }
+
+    private var jarvisSection: some View {
+        Section("J.A.R.V.I.S.") {
+            NavigationLink("What J.A.R.V.I.S. knows") { MemoryView() }
+        }
+    }
+
+    private var dangerSection: some View {
+        Section {
+            Button(role: .destructive) {
+                confirmingReset = true
+            } label: {
+                if isResetting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Reset all data…")
+                        .foregroundStyle(Color.danger)
+                }
+            }
+            .disabled(isResetting)
             .confirmationDialog(
-                "Restart the onboarding interview?",
-                isPresented: $confirmingRestartInterview,
+                "Erase everything and start over?",
+                isPresented: $confirmingReset,
                 titleVisibility: .visible,
             ) {
-                Button("Restart interview", role: .destructive) {
-                    showRestartInterview = true
-                }
+                Button("Erase all data", role: .destructive) { resetAccount() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This abandons any in-progress interview draft.")
+                Text("Deletes your goals, blocks, habits, tasks, mood and score history, photos, conversations, and everything J.A.R.V.I.S. knows. Your account and settings stay. This cannot be undone.")
             }
-            #if os(iOS)
-            .fullScreenCover(isPresented: $showRestartInterview) {
-                OnboardingFlowView(forceFresh: true)
+            if let resetError {
+                Text(resetError)
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.danger)
             }
-            #else
-            .sheet(isPresented: $showRestartInterview) {
-                OnboardingFlowView(forceFresh: true)
+        } header: {
+            Text("Danger zone")
+        } footer: {
+            Text("After the reset the setup wizard runs again.")
+                .font(.captionJ)
+                .foregroundStyle(Color.textTertiary)
+        }
+    }
+
+    private func resetAccount() {
+        isResetting = true
+        resetError = nil
+        Task {
+            do {
+                _ = try await model.api.resetAccount()
+                model.invalidateToday()
+                model.needsFirstRunOnboarding = true
+                dismiss()
+            } catch {
+                model.handle(error)
+                resetError = TodayStore.message(for: error)
             }
-            #endif
+            isResetting = false
         }
     }
 

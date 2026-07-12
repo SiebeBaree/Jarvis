@@ -5,14 +5,14 @@
 export type Tier = "deep" | "fast";
 
 export const TASK_TIERS = {
-  interview_round: "deep",
-  interview_synthesis: "deep",
-  plan_generation: "deep",
   weekly_review: "deep",
   block_review: "deep",
   chat: "fast",
+  seeding: "fast",
   briefing: "fast",
   conversation_title: "fast",
+  memory_extraction: "fast",
+  checkin_commentary: "deep",
 } as const satisfies Record<string, Tier>;
 
 export type AITask = keyof typeof TASK_TIERS;

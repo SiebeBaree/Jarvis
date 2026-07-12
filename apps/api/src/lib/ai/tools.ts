@@ -29,6 +29,8 @@ import { buildDayPayload } from "../today";
 export interface ToolContext {
   userId: string;
   settings: SettingsRow;
+  /** Kind of the conversation the tool runs in ("chat" | "seeding" | reviews). */
+  conversationKind?: string;
 }
 
 const dayKeyArg = z.string().refine(isValidDayKey, { message: "must be YYYY-MM-DD" });
@@ -165,6 +167,37 @@ const READ_TOOLS = {
         orderBy: [asc(moodEntries.dayKey)],
       });
       return rows.map((m) => ({ dayKey: m.dayKey, value: m.value, note: m.note }));
+    },
+  },
+  get_improvement_areas: {
+    description:
+      "Self-improvement areas (posture, clothing, ...) with weekly photo check-in status and the latest AI commentary.",
+    args: z.strictObject({}),
+    execute: async (ctx: ToolContext) => {
+      const { improvementAreas, areaCheckins } = await import("@/db/schema");
+      const { weekStart } = await import("../daykey");
+      const thisWeek = weekStart(todayKey(ctx.settings));
+      const rows = await db.query.improvementAreas.findMany({
+        where: eq(improvementAreas.userId, ctx.userId),
+        orderBy: [asc(improvementAreas.sortOrder)],
+      });
+      const result = [];
+      for (const area of rows.filter((a) => !a.archivedAt)) {
+        const latest = await db.query.areaCheckins.findFirst({
+          where: eq(areaCheckins.areaId, area.id),
+          orderBy: [desc(areaCheckins.weekKey)],
+        });
+        result.push({
+          id: area.id,
+          name: area.name,
+          betterLooksLike: area.betterLooksLike,
+          dueThisWeek: !latest || latest.weekKey < thisWeek,
+          lastCheckin: latest
+            ? { weekKey: latest.weekKey, commentary: latest.aiCommentary?.slice(0, 400) ?? null }
+            : null,
+        });
+      }
+      return result;
     },
   },
   get_metrics: {
@@ -556,8 +589,58 @@ const MUTATING_TOOLS = {
   }),
 } as const;
 
+// ---------- memory tools ----------
+// Execute inline (no confirm card): automatic post-turn extraction already
+// writes memories without confirmation, so an explicit "remember this" during
+// the conversation carries the same trust level.
+
+const MEMORY_TOOLS = {
+  save_memory: {
+    description:
+      "Store one durable fact about the user in long-term memory (identity, work, health, appearance, preferences, relationships, context). Use when the user asks you to remember something or states a clearly durable fact.",
+    args: z.strictObject({
+      category: z.enum([
+        "identity",
+        "work",
+        "health",
+        "appearance",
+        "preferences",
+        "relationships",
+        "context",
+      ]),
+      content: z.string().min(1).max(500),
+    }),
+    execute: async (ctx: ToolContext, args: { category: string; content: string }) => {
+      const { memories } = await import("@/db/schema");
+      const [row] = await db
+        .insert(memories)
+        .values({
+          userId: ctx.userId,
+          category: args.category,
+          content: args.content,
+          source: ctx.conversationKind === "seeding" ? "seeding" : "chat",
+        })
+        .returning();
+      return { memoryId: row!.id, saved: true };
+    },
+  },
+  list_memories: {
+    description: "Everything currently stored in long-term memory about the user.",
+    args: z.strictObject({}),
+    execute: async (ctx: ToolContext) => {
+      const { memories } = await import("@/db/schema");
+      const rows = await db.query.memories.findMany({
+        where: eq(memories.userId, ctx.userId),
+        orderBy: [asc(memories.category), asc(memories.createdAt)],
+      });
+      return rows.map((m) => ({ id: m.id, category: m.category, content: m.content }));
+    },
+  },
+} as const;
+
 export type ReadToolName = keyof typeof READ_TOOLS;
 export type MutatingToolName = keyof typeof MUTATING_TOOLS;
+export type MemoryToolName = keyof typeof MEMORY_TOOLS;
 
 export function isMutatingTool(name: string): name is MutatingToolName {
   return name in MUTATING_TOOLS;
@@ -565,6 +648,20 @@ export function isMutatingTool(name: string): name is MutatingToolName {
 
 export function isReadTool(name: string): name is ReadToolName {
   return name in READ_TOOLS;
+}
+
+export function isMemoryTool(name: string): name is MemoryToolName {
+  return name in MEMORY_TOOLS;
+}
+
+export async function executeMemoryTool(
+  ctx: ToolContext,
+  name: MemoryToolName,
+  rawArgs: unknown,
+): Promise<unknown> {
+  const tool = MEMORY_TOOLS[name];
+  const args = tool.args.parse(rawArgs);
+  return (tool.execute as (c: ToolContext, a: unknown) => Promise<unknown>)(ctx, args);
 }
 
 /** OpenAI function-tool definitions (strict). */
@@ -579,6 +676,7 @@ export function openAIToolDefinitions() {
   return [
     ...Object.entries(READ_TOOLS).map(([name, t]) => define(name, t.description, t.args)),
     ...Object.entries(MUTATING_TOOLS).map(([name, t]) => define(name, t.description, t.args)),
+    ...Object.entries(MEMORY_TOOLS).map(([name, t]) => define(name, t.description, t.args)),
   ];
 }
 

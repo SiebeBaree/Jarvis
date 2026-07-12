@@ -105,6 +105,8 @@ enum ChatDisplay {
             conversation.weekNumber.map { "Week \($0) review" } ?? "Weekly review"
         case "block_review":
             "Block review"
+        case "seeding":
+            "Getting to know you"
         default:
             "Conversation"
         }

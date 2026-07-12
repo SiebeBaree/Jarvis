@@ -39,7 +39,13 @@ export const interviewStatus = pgEnum("interview_status", [
   "applied",
   "abandoned",
 ]);
-export const conversationKind = pgEnum("conversation_kind", ["chat", "weekly_review", "block_review"]);
+export const conversationKind = pgEnum("conversation_kind", [
+  "chat",
+  "weekly_review",
+  "block_review",
+  "seeding",
+]);
+export const memorySource = pgEnum("memory_source", ["chat", "seeding", "manual"]);
 export const messageRole = pgEnum("message_role", ["user", "assistant", "tool"]);
 export const actionStatus = pgEnum("action_status", ["proposed", "executed", "rejected", "expired"]);
 export const briefingKind = pgEnum("briefing_kind", ["morning", "wrapup"]);
@@ -390,6 +396,61 @@ export const briefings = pgTable("briefings", {
   model: text("model").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.dayKey, t.kind] })]);
+
+// ---------- AI memory (one durable fact per row) ----------
+// Auto-extracted after chat turns; fully user-editable in the Memory screen.
+
+export const memories = pgTable("memories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  category: text("category").notNull(), // identity|work|health|appearance|preferences|relationships|context
+  content: text("content").notNull(),
+  source: memorySource("source").notNull().default("chat"),
+  conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("memories_user_idx").on(t.userId, t.category)]);
+
+// ---------- improvement areas & weekly photo check-ins ----------
+// Self-improvement areas (posture, clothing, teeth...). One photo check-in per
+// area per week (weekKey = that week's Monday); AI commentary is generated
+// asynchronously after upload. Never feeds the daily score.
+
+export const improvementAreas = pgTable("improvement_areas", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  emoji: varchar("emoji", { length: 16 }),
+  // What "better" looks like, in the user's words — feeds the commentary prompt.
+  betterLooksLike: text("better_looks_like"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("improvement_areas_user_name_uq").on(t.userId, t.name)]);
+
+export const areaCheckins = pgTable("area_checkins", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  areaId: uuid("area_id")
+    .notNull()
+    .references(() => improvementAreas.id, { onDelete: "cascade" }),
+  weekKey: date("week_key").notNull(), // Monday of the check-in's week
+  dayKey: date("day_key").notNull(),
+  blobKey: text("blob_key").notNull(), // Vercel Blob pathname (private store)
+  blobUrl: text("blob_url").notNull(),
+  contentType: text("content_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  aiCommentary: text("ai_commentary"), // null until generated (async via after())
+  aiModel: text("ai_model"),
+  aiGeneratedAt: timestamp("ai_generated_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("area_checkins_week_uq").on(t.areaId, t.weekKey)]);
 
 // ---------- body metrics & progress photos ----------
 

@@ -59,8 +59,16 @@ struct TodayView: View {
                 .accessibilityLabel("Settings")
             }
             #if os(iOS)
-            // Trends (and Body inside it) live behind this on iPhone;
-            // macOS reaches them via the sidebar.
+            // Trends (and Body inside it) + Improve live behind these on
+            // iPhone; macOS reaches them via the sidebar.
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink {
+                    ImproveView()
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .accessibilityLabel("Improve")
+            }
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink {
                     TrendsView()
@@ -98,7 +106,7 @@ struct TodayView: View {
                 preloaded: store.payload?.habits.first(where: { $0.habit.id == route.habitId })?.habit,
             )
         }
-        .onboardingInterviewCover(isPresented: $showPlanOnboarding)
+        .setupWizardCover(isPresented: $showPlanOnboarding)
         .task {
             store.configure(model)
             await store.load()
@@ -128,6 +136,7 @@ struct TodayView: View {
                 BriefingSlot(payload: payload) // Stage 3: morning briefing card
                 scoreHeader(payload)
                 moodSection(payload)
+                CheckinPromptCard() // weekly improvement-area photo prompt
                 WeeklyReviewSlot(payload: payload) // Stage 4: weekly review banner
                 WrapupSlot(payload: payload) // Stage 3: evening wrap-up banner
                 if !payload.overdueTasks.isEmpty {
@@ -232,16 +241,16 @@ struct TodayView: View {
 
     // MARK: - Plan setup banner
 
-    /// Shown while no 12-week block exists — routes into onboarding.
+    /// Shown while no 12-week block exists — routes into the setup wizard.
     private var planSetupBanner: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             Text("Set up your 12-week plan")
                 .font(.headlineJ)
                 .foregroundStyle(Color.textPrimary)
-            Text("A short interview turns your goals into weekly tactics and habits.")
+            Text("You write the goals and habits — Jarvis tracks the execution.")
                 .font(.subheadJ)
                 .foregroundStyle(Color.textSecondary)
-            Button("Start interview") {
+            Button("Set up your plan") {
                 showPlanOnboarding = true
             }
             .buttonStyle(.jarvisPrimary)

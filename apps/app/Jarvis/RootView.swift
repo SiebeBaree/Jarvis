@@ -26,10 +26,11 @@ enum AppSection: String, CaseIterable, Identifiable {
     case chat
     case trends
     case body
+    case improve
 
     var id: String { rawValue }
 
-    /// iPhone tab bar (Trends/Body live behind Today's toolbar there).
+    /// iPhone tab bar (Trends/Body/Improve live behind Today's toolbar there).
     static let tabSections: [AppSection] = [.today, .tasks, .habits, .plan, .chat]
 
     /// macOS sidebar shows everything, grouped.
@@ -37,7 +38,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         (nil, [.today, .chat]),
         ("Plan", [.plan]),
         ("Track", [.tasks, .habits]),
-        ("Progress", [.trends, .body]),
+        ("Progress", [.trends, .body, .improve]),
     ]
 
     var title: String {
@@ -49,6 +50,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .chat: "Chat"
         case .trends: "Trends"
         case .body: "Body"
+        case .improve: "Improve"
         }
     }
 
@@ -61,6 +63,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .chat: "bubble.left.and.text.bubble.right"
         case .trends: "chart.line.uptrend.xyaxis"
         case .body: "figure.arms.open"
+        case .improve: "sparkles"
         }
     }
 }
@@ -79,13 +82,20 @@ struct MainShell: View {
                 }
             }
             .task {
-                // First run (§B4): fresh account → the app IS the interview.
+                // First run: fresh account → the manual setup wizard.
                 if model.needsFirstRunOnboarding {
                     model.needsFirstRunOnboarding = false
                     showFirstRunOnboarding = true
                 }
             }
-            .onboardingInterviewCover(isPresented: $showFirstRunOnboarding)
+            .onChange(of: model.needsFirstRunOnboarding) { _, needed in
+                // Re-triggered after an account reset from Settings.
+                if needed {
+                    model.needsFirstRunOnboarding = false
+                    showFirstRunOnboarding = true
+                }
+            }
+            .setupWizardCover(isPresented: $showFirstRunOnboarding)
     }
 
     @ViewBuilder
@@ -177,6 +187,7 @@ struct MainShell: View {
         case .chat: ChatView()
         case .trends: TrendsView()
         case .body: BodyView()
+        case .improve: ImproveView()
         }
     }
 }

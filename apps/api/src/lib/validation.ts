@@ -134,10 +134,47 @@ export const tacticListQuerySchema = z
   });
 export const tacticWeekPutSchema = z.object({ done: z.boolean() });
 
-// ---------- AI interview ----------
-export const interviewStartSchema = z.object({
-  kind: z.enum(["onboarding", "reonboarding", "vision"]).default("onboarding"),
+// ---------- AI memory ----------
+export const memoryCategories = [
+  "identity",
+  "work",
+  "health",
+  "appearance",
+  "preferences",
+  "relationships",
+  "context",
+] as const;
+export const memoryCreateSchema = z.object({
+  category: z.enum(memoryCategories),
+  content: z.string().min(1).max(500),
 });
+export const memoryPatchSchema = z
+  .object({
+    category: z.enum(memoryCategories).optional(),
+    content: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+
+// ---------- improvement areas & check-ins ----------
+export const improvementAreaCreateSchema = z.object({
+  name: z.string().min(1).max(60),
+  emoji: z.string().max(16).nullish(),
+  betterLooksLike: z.string().max(2000).nullish(),
+  sortOrder: z.number().int().optional(),
+});
+export const improvementAreaPatchSchema = z
+  .object({
+    name: z.string().min(1).max(60).optional(),
+    emoji: z.string().max(16).nullable().optional(),
+    betterLooksLike: z.string().max(2000).nullable().optional(),
+    sortOrder: z.number().int().optional(),
+    archived: z.boolean().optional(),
+  })
+  .strict();
+export const checkinUploadQuerySchema = z.object({ dayKey: dayKeySchema });
+
+// ---------- account ----------
+export const accountResetSchema = z.object({ confirm: z.literal("RESET") });
 
 // ---------- tasks ----------
 export const taskCreateSchema = z.object({
@@ -311,4 +348,7 @@ export const photoUploadQuerySchema = z.object({
 export const chatRequestSchema = z.object({
   conversationId: z.string().uuid().nullish(),
   message: z.string().min(1).max(8000),
+  // Kind for a NEW conversation (ignored when conversationId is set).
+  // "seeding" = the plan-free get-to-know-you conversation from the setup wizard.
+  kind: z.enum(["chat", "seeding"]).optional(),
 });

@@ -143,10 +143,12 @@ public struct GoalCreateRequest: Encodable, Sendable {
     public let title: String
     public let description: String?
     public let areaId: String?
-    public init(title: String, description: String? = nil, areaId: String? = nil) {
+    public let blockId: String?
+    public init(title: String, description: String? = nil, areaId: String? = nil, blockId: String? = nil) {
         self.title = title
         self.description = description
         self.areaId = areaId
+        self.blockId = blockId
     }
 }
 

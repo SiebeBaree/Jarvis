@@ -309,9 +309,8 @@ private struct AnyButtonStyle: ButtonStyle {
     }
 }
 
-/// Presents the re-onboarding interview for the next block (§B3 Week 13).
-/// Mirrors OnboardingPresenter (Features/Plan, not owned here) but forces a
-/// fresh interview and runs a completion when it dismisses.
+/// Presents next-block planning (§B3 Week 13): the manual setup wizard,
+/// with a completion when it dismisses.
 private struct NextBlockPlanningModifier: ViewModifier {
     @Binding var isPresented: Bool
     let onDismiss: () -> Void
@@ -319,12 +318,11 @@ private struct NextBlockPlanningModifier: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
         content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
-            OnboardingFlowView(forceFresh: true, kind: "reonboarding")
-                .frame(minWidth: 640, minHeight: 700)
+            SetupWizardView()
         }
         #else
         content.fullScreenCover(isPresented: $isPresented, onDismiss: onDismiss) {
-            OnboardingFlowView(forceFresh: true, kind: "reonboarding")
+            SetupWizardView()
         }
         #endif
     }

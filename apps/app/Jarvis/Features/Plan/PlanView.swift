@@ -62,7 +62,7 @@ struct PlanView: View {
         .navigationDestination(item: $weekRoute) { route in
             WeekDetailView(store: store, weekNumber: route.weekNumber)
         }
-        .onboardingInterviewCover(isPresented: $showOnboarding)
+        .setupWizardCover(isPresented: $showOnboarding)
         .reviewFlowCover(isPresented: $showWeeklyReview, kind: .weekly)
         .reviewFlowCover(isPresented: $showBlockRetro, kind: .block)
         .sheet(isPresented: $showManualBlock) {
@@ -158,16 +158,16 @@ struct PlanView: View {
             Text("No active block")
                 .font(.title2J)
                 .foregroundStyle(Color.textPrimary)
-            Text("Your 12-week plan starts with a short interview — goals, weekly tactics, and habits come out of it.")
+            Text("Set up your next 12 weeks — you write the areas, goals, and habits yourself.")
                 .font(.bodyJ)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
-            Button("Start onboarding interview") {
+            Button("Set up your plan") {
                 showOnboarding = true
             }
             .buttonStyle(.jarvisPrimary)
-            Button("Create block manually") {
+            Button("Just create a block") {
                 showManualBlock = true
             }
             .buttonStyle(.jarvisGhost)

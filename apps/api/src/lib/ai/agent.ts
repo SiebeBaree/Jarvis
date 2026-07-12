@@ -18,8 +18,10 @@ import { buildChatContext } from "./context";
 import { getClient, resolveAIConfig } from "./provider";
 import { TASK_TIERS, type AITask } from "./tiers";
 import {
+  executeMemoryTool,
   executeMutation,
   executeReadTool,
+  isMemoryTool,
   isMutatingTool,
   isReadTool,
   openAIToolDefinitions,
@@ -76,7 +78,6 @@ export async function runAgentTurn(
   events: AgentEvents,
 ): Promise<{ assistantMessageId: string }> {
   const { userId, settings, conversationId } = options;
-  const ctx: ToolContext = { userId, settings };
 
   const conversation = await db.query.conversations.findFirst({
     where: eq(conversations.id, conversationId),
@@ -84,6 +85,7 @@ export async function runAgentTurn(
   if (!conversation || conversation.userId !== userId) {
     throw new ApiError(404, "not_found", "Conversation not found");
   }
+  const ctx: ToolContext = { userId, settings, conversationKind: conversation.kind };
 
   const history = await db.query.messages.findMany({
     where: eq(messages.conversationId, conversationId),
@@ -184,10 +186,14 @@ export async function runAgentTurn(
           continue;
         }
 
-        if (isReadTool(call.name)) {
+        if (isReadTool(call.name) || isMemoryTool(call.name)) {
+          // Read + memory tools run inline; memory writes carry the same trust
+          // level as the automatic post-turn extraction.
           events.onToolStatus(call.name, "running");
           try {
-            const result = await executeReadTool(ctx, call.name, rawArgs);
+            const result = isReadTool(call.name)
+              ? await executeReadTool(ctx, call.name, rawArgs)
+              : await executeMemoryTool(ctx, call.name, rawArgs);
             collectedParts.push({ type: "tool_call", callId: call.call_id, name: call.name, args: rawArgs });
             collectedParts.push({ type: "tool_result", callId: call.call_id, result });
             outputs.push(functionOutput(call.call_id, result));

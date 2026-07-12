@@ -49,8 +49,8 @@ export function getClient(config: AIConfig): OpenAI {
 export interface ModelCallOptions {
   task: AITask;
   instructions: string;
-  /** User-turn input (string or structured content). */
-  input: string;
+  /** User-turn input: plain text, or structured Responses-API items (vision). */
+  input: string | Array<Record<string, unknown>>;
   previousResponseId?: string | null;
   /** When set, forces strict JSON-schema output and parses it. */
   jsonSchema?: { name: string; schema: Record<string, unknown> };
@@ -73,7 +73,7 @@ export async function callModel<T = unknown>(options: ModelCallOptions): Promise
   const response = await client.responses.create({
     model: config.models[tier],
     instructions: options.instructions,
-    input: options.input,
+    input: options.input as never,
     reasoning: { effort: config.efforts[tier] as never },
     max_output_tokens: options.maxOutputTokens ?? 16_000,
     ...(options.previousResponseId ? { previous_response_id: options.previousResponseId } : {}),

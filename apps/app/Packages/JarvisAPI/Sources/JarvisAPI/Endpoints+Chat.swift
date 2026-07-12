@@ -6,6 +6,9 @@ import Foundation
 private struct ChatRequest: Encodable, Sendable {
     let conversationId: String?
     let message: String
+    /// Kind for a NEW conversation ("chat" | "seeding"); ignored when
+    /// conversationId is set.
+    let kind: String?
 
     // Encode conversationId explicitly so a nil becomes JSON null rather than
     // an absent key (the server accepts either; null is the documented shape).
@@ -13,10 +16,11 @@ private struct ChatRequest: Encodable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(conversationId, forKey: .conversationId)
         try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(kind, forKey: .kind)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case conversationId, message
+        case conversationId, message, kind
     }
 }
 
@@ -33,6 +37,7 @@ extension APIClient {
     public nonisolated func chatStream(
         conversationId: String?,
         message: String,
+        kind: String? = nil,
     ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -40,7 +45,7 @@ extension APIClient {
                     var (request, session) = try await self.makeRequest(
                         method: "POST",
                         path: "/ai/chat",
-                        body: ChatRequest(conversationId: conversationId, message: message),
+                        body: ChatRequest(conversationId: conversationId, message: message, kind: kind),
                     )
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
