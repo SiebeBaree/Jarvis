@@ -1,3 +1,2 @@
 // Release builds talk to the production API on Vercel.
-// Set this once the Vercel project exists.
-API_BASE_URL = https:/$()/jarvis-api.vercel.app
+API_BASE_URL = https:/$()/api.jarvis.baree.be
