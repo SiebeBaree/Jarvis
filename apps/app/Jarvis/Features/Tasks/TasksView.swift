@@ -7,6 +7,10 @@ private struct TaskRoute: Identifiable, Hashable {
     let id: String
 }
 
+/// Tasks tab. Structured like TodayView: ONE List owns the whole page —
+/// the segment chips are the first scrolling row, never a fixed bar. On
+/// macOS a fixed region under the title makes the window toolbar paint its
+/// permanent opaque band; a scroll view at the top edge keeps it transparent.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var store = TasksStore()
@@ -21,28 +25,31 @@ struct TasksView: View {
     #endif
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Space.sm) {
-                ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
-                searchToggle
+        List {
+            Group {
+                controlsRow
+                if showSearch {
+                    searchField
+                }
+                if let actionError = store.actionError {
+                    inlineError(actionError)
+                }
+                listBody
             }
-            .padding(.horizontal, PageMargin.standard)
-            .padding(.vertical, Space.sm)
-
-            if showSearch {
-                searchField
-            }
-
-            if let actionError = store.actionError {
-                inlineError(actionError)
-            }
-
-            listContent
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(
+                top: Space.xs, leading: PageMargin.standard,
+                bottom: Space.xs, trailing: PageMargin.standard,
+            ))
+            #if os(macOS)
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+            #endif
         }
-        #if os(macOS)
-        .frame(maxWidth: 760)
-        .frame(maxWidth: .infinity)
-        #endif
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable { await store.fetch(force: true) }
         .background(Color.bgCanvas)
         .navigationTitle("Tasks")
         .toolbar {
@@ -102,6 +109,16 @@ struct TasksView: View {
     }
     #endif
 
+    // MARK: - Controls (first list row)
+
+    private var controlsRow: some View {
+        HStack(spacing: Space.sm) {
+            ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
+            searchToggle
+        }
+        .padding(.top, Space.xs)
+    }
+
     // MARK: - Search (inline — the system .searchable forces heavy
     // window-toolbar chrome on macOS, so search lives in the content instead)
 
@@ -153,18 +170,17 @@ struct TasksView: View {
         .padding(.vertical, 6)
         .background(Color.bgSurface, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        .padding(.horizontal, PageMargin.standard)
-        .padding(.bottom, Space.sm)
     }
 
-    // MARK: - List
+    // MARK: - List body
 
     @ViewBuilder
-    private var listContent: some View {
+    private var listBody: some View {
         switch store.state {
         case .idle, .loading:
             ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Space.xxl * 2)
         case .failed(let message):
             VStack(spacing: Space.md) {
                 Text(message)
@@ -176,15 +192,15 @@ struct TasksView: View {
                 }
                 .buttonStyle(.jarvisSecondary)
             }
-            .padding(PageMargin.standard)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Space.xxl)
         case .loaded:
-            segmentList
+            segmentBody
         }
     }
 
     @ViewBuilder
-    private var segmentList: some View {
+    private var segmentBody: some View {
         switch store.segment {
         case .today:
             let overdue = store.overdueTasks
@@ -192,27 +208,25 @@ struct TasksView: View {
             if overdue.isEmpty && today.isEmpty {
                 emptyState("No tasks today — add one")
             } else {
-                taskList {
-                    if !overdue.isEmpty {
-                        Section {
-                            ForEach(overdue) { task in
-                                row(
-                                    for: task,
-                                    overdueLabel: task.dueDate.map { "was due \(TaskDateLabels.shortLabel(for: $0))" },
-                                )
-                            }
-                        } header: {
-                            captionHeader("Overdue", color: .warning)
+                if !overdue.isEmpty {
+                    Section {
+                        ForEach(overdue) { task in
+                            row(
+                                for: task,
+                                overdueLabel: task.dueDate.map { "was due \(TaskDateLabels.shortLabel(for: $0))" },
+                            )
                         }
+                    } header: {
+                        captionHeader("Overdue", color: .warning)
                     }
-                    if !today.isEmpty {
-                        Section {
-                            ForEach(today) { task in
-                                row(for: task)
-                            }
-                        } header: {
-                            captionHeader("Today")
+                }
+                if !today.isEmpty {
+                    Section {
+                        ForEach(today) { task in
+                            row(for: task)
                         }
+                    } header: {
+                        captionHeader("Today")
                     }
                 }
             }
@@ -221,15 +235,13 @@ struct TasksView: View {
             if groups.isEmpty {
                 emptyState("Nothing scheduled ahead")
             } else {
-                taskList {
-                    ForEach(groups) { group in
-                        Section {
-                            ForEach(group.tasks) { task in
-                                row(for: task)
-                            }
-                        } header: {
-                            captionHeader(group.title)
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.tasks) { task in
+                            row(for: task)
                         }
+                    } header: {
+                        captionHeader(group.title)
                     }
                 }
             }
@@ -238,10 +250,8 @@ struct TasksView: View {
             if tasks.isEmpty {
                 emptyState("No tasks — add one")
             } else {
-                taskList {
-                    ForEach(tasks) { task in
-                        row(for: task)
-                    }
+                ForEach(tasks) { task in
+                    row(for: task)
                 }
             }
         case .done:
@@ -249,33 +259,21 @@ struct TasksView: View {
             if tasks.isEmpty {
                 emptyState("Nothing completed yet")
             } else {
-                taskList {
-                    ForEach(tasks) { task in
-                        VStack(alignment: .leading, spacing: 0) {
-                            row(for: task)
-                            if let completedAt = task.completedAt,
-                               let label = TaskDateLabels.completedLabel(for: completedAt) {
-                                Text("Completed \(label)")
-                                    .font(.captionJ)
-                                    .foregroundStyle(Color.textTertiary)
-                                    .padding(.leading, 34)
-                                    .padding(.bottom, Space.xs)
-                            }
+                ForEach(tasks) { task in
+                    VStack(alignment: .leading, spacing: 0) {
+                        row(for: task)
+                        if let completedAt = task.completedAt,
+                           let label = TaskDateLabels.completedLabel(for: completedAt) {
+                            Text("Completed \(label)")
+                                .font(.captionJ)
+                                .foregroundStyle(Color.textTertiary)
+                                .padding(.leading, 34)
+                                .padding(.bottom, Space.xs)
                         }
-                        .listRowBackground(Color.bgCanvas)
                     }
                 }
             }
         }
-    }
-
-    private func taskList(@ViewBuilder content: () -> some View) -> some View {
-        List {
-            content()
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .refreshable { await store.fetch(force: true) }
     }
 
     // MARK: - Rows & helpers
@@ -290,7 +288,6 @@ struct TasksView: View {
             },
             onTap: { open(task) },
         )
-        .listRowBackground(Color.bgCanvas)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if task.status == .open {
                 Button {
@@ -343,8 +340,8 @@ struct TasksView: View {
             Button("Add task") { showingEditor = true }
                 .buttonStyle(.jarvisGhost)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(PageMargin.standard)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.xxl * 2)
     }
 
     private func inlineError(_ message: String) -> some View {
@@ -358,7 +355,5 @@ struct TasksView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.accentPrimary)
         }
-        .padding(.horizontal, PageMargin.standard)
-        .padding(.vertical, Space.xs)
     }
 }
