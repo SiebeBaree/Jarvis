@@ -12,6 +12,8 @@ struct TasksView: View {
     @State private var store = TasksStore()
     @State private var showingEditor = false
     @State private var showingRecurring = false
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
     #if os(macOS)
     @State private var selectedTaskId: String?
     #else
@@ -20,9 +22,16 @@ struct TasksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
-                .padding(.horizontal, PageMargin.standard)
-                .padding(.vertical, Space.sm)
+            HStack(spacing: Space.sm) {
+                ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
+                searchToggle
+            }
+            .padding(.horizontal, PageMargin.standard)
+            .padding(.vertical, Space.sm)
+
+            if showSearch {
+                searchField
+            }
 
             if let actionError = store.actionError {
                 inlineError(actionError)
@@ -36,7 +45,6 @@ struct TasksView: View {
         #endif
         .background(Color.bgCanvas)
         .navigationTitle("Tasks")
-        .searchable(text: $store.searchText, prompt: "Search tasks")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -93,6 +101,61 @@ struct TasksView: View {
         )
     }
     #endif
+
+    // MARK: - Search (inline — the system .searchable forces heavy
+    // window-toolbar chrome on macOS, so search lives in the content instead)
+
+    private var searchToggle: some View {
+        Button {
+            if showSearch {
+                store.searchText = ""
+                showSearch = false
+            } else {
+                showSearch = true
+                searchFocused = true
+            }
+        } label: {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(showSearch ? Color.accentPrimary : Color.textSecondary)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, 6)
+                .background(showSearch ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("f", modifiers: .command)
+        .accessibilityLabel(showSearch ? "Close search" : "Search tasks")
+    }
+
+    private var searchField: some View {
+        HStack(spacing: Space.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.textTertiary)
+            TextField("Search tasks", text: Bindable(store).searchText)
+                .font(.subheadJ)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+            if !store.searchText.isEmpty {
+                Button {
+                    store.searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, Space.md)
+        .padding(.vertical, 6)
+        .background(Color.bgSurface, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        .padding(.horizontal, PageMargin.standard)
+        .padding(.bottom, Space.sm)
+    }
 
     // MARK: - List
 
