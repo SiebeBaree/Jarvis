@@ -11,6 +11,8 @@ final class AppModel {
     }
 
     let api: APIClient
+    /// TTL cache for GET responses; cleared on every mutation and sign-out.
+    let cache = RequestCache()
     private(set) var session: SessionState = .checking
 
     /// Bumped after any mutation so open screens (Today especially) refetch.
@@ -36,6 +38,7 @@ final class AppModel {
     }
 
     func invalidateToday() {
+        cache.removeAll()
         todayRevision += 1
     }
 
@@ -81,6 +84,7 @@ final class AppModel {
         _ = try? await api.logout()
         Keychain.deleteToken()
         await api.setToken(nil)
+        cache.removeAll()
         session = .loggedOut
     }
 

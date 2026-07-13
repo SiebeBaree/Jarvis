@@ -30,8 +30,15 @@ final class HabitsStore {
         if self.model == nil { self.model = model }
     }
 
-    func load() async {
+    private static let cacheKey = "habits:content"
+
+    func load(force: Bool = false) async {
         guard let model else { return }
+        if !force, let cached: Content = model.cache.get(Self.cacheKey) {
+            content = .loaded(cached)
+            loadStats(for: cached.habits)
+            return
+        }
         if content.value == nil { content = .loading }
         do {
             async let habitsResponse = model.api.habits()
@@ -44,6 +51,7 @@ final class HabitsStore {
                 today: today,
             )
             content = .loaded(loaded)
+            model.cache.set(Self.cacheKey, loaded)
             loadStats(for: loaded.habits)
         } catch {
             model.handle(error)
@@ -125,12 +133,38 @@ final class HabitsStore {
 
     // MARK: - Mutations
 
+    /// Optimistic: reps flip instantly, rollback on failure.
     func logHabit(_ habitId: String) async {
-        await run(invalidatingStatsFor: habitId) { try await $0.logHabit(id: habitId) }
+        await adjustReps(habitId, delta: 1) { try await $0.logHabit(id: habitId) }
     }
 
     func unlogHabit(_ habitId: String) async {
-        await run(invalidatingStatsFor: habitId) { try await $0.unlogHabit(id: habitId) }
+        await adjustReps(habitId, delta: -1) { try await $0.unlogHabit(id: habitId) }
+    }
+
+    private func adjustReps(
+        _ habitId: String,
+        delta: Int,
+        _ operation: (APIClient) async throws -> some Sendable,
+    ) async {
+        guard let model else { return }
+        let original = content
+        if var loaded = content.value {
+            loaded.today.habits = loaded.today.habits.map {
+                $0.habit.id == habitId ? $0.adjustingReps(by: delta) : $0
+            }
+            content = .loaded(loaded)
+        }
+        do {
+            _ = try await operation(model.api)
+            mutationError = nil
+            invalidateStats(for: habitId)
+            model.invalidateToday()
+        } catch {
+            model.handle(error)
+            content = original
+            mutationError = TodayStore.message(for: error)
+        }
     }
 
     func setPaused(_ habit: HabitDTO, paused: Bool) async {

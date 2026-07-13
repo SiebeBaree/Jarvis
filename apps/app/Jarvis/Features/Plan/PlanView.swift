@@ -111,7 +111,7 @@ struct PlanView: View {
                 .frame(maxWidth: .infinity)
                 #endif
             }
-            .refreshable { await store.load() }
+            .refreshable { await store.load(force: true) }
         } else {
             emptyState
         }

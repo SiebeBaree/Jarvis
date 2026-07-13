@@ -2,9 +2,9 @@
 // GET /days/today triggers recurrence materialization + a provisional score
 // recompute, so opening the app is what keeps the world consistent.
 
-import { and, asc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm";
 import { db } from "@/db/client";
-import { habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
+import { blocks, habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
 import type { SettingsRow } from "./auth";
 import { reconcileBlockStatuses } from "./blocks";
 import { addDays, weekEnd, weekStart, weekIndexInBlock, type DayKey } from "./daykey";
@@ -101,6 +101,9 @@ export interface DayPayload {
   weekNumber: number | null;
   isReviewWeek: boolean;
   block: { id: string; number: number; title: string; startDate: string; endDate: string } | null;
+  /** Set when no block covers this day but one is scheduled to start later —
+   * the client shows "starts Monday" instead of the plan-setup banner. */
+  upcomingBlock: { id: string; number: number; title: string; startDate: string; endDate: string } | null;
   score: DaySnapshot;
   tasksDue: TaskDTO[];
   overdueTasks: TaskDTO[];
@@ -130,6 +133,16 @@ export async function buildDayPayload(
 
   const snapshot = await recomputeDay(userId, settings, dayKey, now);
   const block = await activeBlockFor(userId, dayKey);
+  const upcoming = block
+    ? null
+    : await db.query.blocks.findFirst({
+        where: and(
+          eq(blocks.userId, userId),
+          gt(blocks.startDate, dayKey),
+          ne(blocks.status, "completed"),
+        ),
+        orderBy: [asc(blocks.startDate)],
+      });
 
   const [dueTop, overdueTop, dayHabits, reps, mood, yesterdayMood] = await Promise.all([
     db.query.tasks.findMany({
@@ -234,6 +247,15 @@ export async function buildDayPayload(
           title: block.title,
           startDate: block.startDate,
           endDate: block.endDate,
+        }
+      : null,
+    upcomingBlock: upcoming
+      ? {
+          id: upcoming.id,
+          number: upcoming.number,
+          title: upcoming.title,
+          startDate: upcoming.startDate,
+          endDate: upcoming.endDate,
         }
       : null,
     score: snapshot,

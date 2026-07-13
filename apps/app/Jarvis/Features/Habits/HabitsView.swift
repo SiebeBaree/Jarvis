@@ -111,7 +111,7 @@ struct HabitsView: View {
                 .frame(maxWidth: .infinity)
                 #endif
             }
-            .refreshable { await store.load() }
+            .refreshable { await store.load(force: true) }
         }
     }
 
@@ -149,15 +149,15 @@ struct HabitsView: View {
         .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     }
 
-    // MARK: - Header strip
+    // MARK: - Header line
 
+    /// Quiet caption line — no bar chrome, matches the app's section style.
     private var headerStrip: some View {
         let summary = store.paceSummary
         return HStack(spacing: Space.md) {
             Text("This week · \(summary.onPace) of \(summary.total) habits on pace")
                 .font(.subheadJ)
                 .foregroundStyle(Color.textSecondary)
-            Spacer(minLength: Space.sm)
             HStack(spacing: Space.xs) {
                 ForEach(Array(summary.flags.enumerated()), id: \.offset) { _, onPace in
                     Circle()
@@ -165,9 +165,8 @@ struct HabitsView: View {
                         .frame(width: 6, height: 6)
                 }
             }
+            Spacer(minLength: 0)
         }
-        .padding(Space.md)
-        .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     }
 
     // MARK: - Habit card

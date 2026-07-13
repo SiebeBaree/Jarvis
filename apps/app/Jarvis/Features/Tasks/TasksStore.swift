@@ -69,28 +69,45 @@ final class TasksStore {
 
     // MARK: - Fetching
 
-    func fetch() async {
+    private struct SegmentData {
+        var tasks: [TaskDTO]
+        var noDate: [TaskDTO]
+    }
+
+    func fetch(force: Bool = false) async {
         guard let model else { return }
+        let cacheKey = "tasks:\(segment.rawValue)"
+        if !force, let cached: SegmentData = model.cache.get(cacheKey) {
+            remember(cached.tasks)
+            remember(cached.noDate)
+            noDateTasks = cached.noDate
+            state = .loaded(cached.tasks)
+            return
+        }
         if state.value == nil { state = .loading }
         do {
+            let data: SegmentData
             switch segment {
             case .today, .all:
                 let response = try await model.api.tasks(view: "all")
-                remember(response.tasks)
-                state = .loaded(response.tasks)
+                data = SegmentData(tasks: response.tasks, noDate: [])
             case .upcoming:
                 async let upcomingCall = model.api.tasks(view: "upcoming")
                 async let inboxCall = model.api.tasks(view: "inbox")
                 let (upcoming, inbox) = try await (upcomingCall, inboxCall)
-                remember(upcoming.tasks)
-                remember(inbox.tasks)
-                noDateTasks = inbox.tasks.filter { $0.status == .open }
-                state = .loaded(upcoming.tasks)
+                data = SegmentData(
+                    tasks: upcoming.tasks,
+                    noDate: inbox.tasks.filter { $0.status == .open },
+                )
             case .done:
                 let response = try await model.api.tasks(view: "done")
-                remember(response.tasks)
-                state = .loaded(response.tasks)
+                data = SegmentData(tasks: response.tasks, noDate: [])
             }
+            remember(data.tasks)
+            remember(data.noDate)
+            noDateTasks = data.noDate
+            state = .loaded(data.tasks)
+            model.cache.set(cacheKey, data)
         } catch {
             model.handle(error)
             state = .failed(error.localizedDescription)
@@ -99,8 +116,13 @@ final class TasksStore {
 
     func fetchGoals() async {
         guard let model else { return }
+        if let cached: [GoalDTO] = model.cache.get("goals") {
+            goals = cached
+            return
+        }
         if let response = try? await model.api.goals() {
             goals = response.goals
+            model.cache.set("goals", response.goals)
         }
     }
 
@@ -220,18 +242,29 @@ final class TasksStore {
 
     // MARK: - Mutations
 
+    /// Optimistic: the row flips instantly, the API call runs behind it, a
+    /// failure restores the previous list.
     func toggleComplete(_ task: TaskDTO) async {
         guard let model else { return }
+        let originalState = state
+        let newStatus: TaskStatus = task.status == .done ? .open : .done
+        let optimistic = task.with(status: newStatus)
+        if let tasks = state.value {
+            state = .loaded(tasks.map { $0.id == task.id ? optimistic : $0 })
+        }
+        cache[task.id] = optimistic
         do {
-            let updated = task.status == .done
-                ? try await model.api.uncompleteTask(id: task.id)
-                : try await model.api.completeTask(id: task.id)
+            let updated = newStatus == .done
+                ? try await model.api.completeTask(id: task.id)
+                : try await model.api.uncompleteTask(id: task.id)
             cache[updated.id] = updated
             actionError = nil
             model.invalidateToday()
-            await fetch()
+            await fetch(force: true)
         } catch {
             model.handle(error)
+            state = originalState
+            cache[task.id] = task
             actionError = error.localizedDescription
         }
     }
@@ -243,7 +276,7 @@ final class TasksStore {
             cache[updated.id] = updated
             actionError = nil
             model.invalidateToday()
-            await fetch()
+            await fetch(force: true)
         } catch {
             model.handle(error)
             actionError = error.localizedDescription
@@ -252,14 +285,19 @@ final class TasksStore {
 
     func delete(_ task: TaskDTO) async {
         guard let model else { return }
+        let originalState = state
+        if let tasks = state.value {
+            state = .loaded(tasks.filter { $0.id != task.id })
+        }
         do {
             _ = try await model.api.deleteTask(id: task.id)
             cache[task.id] = nil
             actionError = nil
             model.invalidateToday()
-            await fetch()
+            await fetch(force: true)
         } catch {
             model.handle(error)
+            state = originalState
             actionError = error.localizedDescription
         }
     }

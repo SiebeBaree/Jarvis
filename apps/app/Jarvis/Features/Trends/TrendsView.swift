@@ -46,7 +46,14 @@ final class TrendsStore {
         if self.model == nil { self.model = model }
     }
 
-    func load(range: TrendsRange) async {
+    func load(range: TrendsRange, force: Bool = false) async {
+        if force, let model {
+            model.cache.remove("trends:scores:\(range.rawValue)")
+            model.cache.remove("trends:weekly")
+            model.cache.remove("trends:heatmap")
+            weekly = .idle
+            heatmap = .idle
+        }
         async let scoresLoad: Void = loadScores(range: range)
         async let weeklyLoad: Void = loadWeekly()
         async let heatmapLoad: Void = loadHeatmap()
@@ -55,6 +62,11 @@ final class TrendsStore {
 
     func loadScores(range: TrendsRange) async {
         guard let model else { return }
+        let cacheKey = "trends:scores:\(range.rawValue)"
+        if let cached: [ScorePointDTO] = model.cache.get(cacheKey) {
+            scores = .loaded(cached)
+            return
+        }
         if scores.value == nil { scores = .loading }
         do {
             let today = DayKeyMath.todayKey()
@@ -62,7 +74,9 @@ final class TrendsStore {
                 from: DayKeyMath.addDays(today, -(range.rawValue - 1)),
                 to: today,
             )
-            scores = .loaded(response.scores.sorted { $0.dayKey < $1.dayKey })
+            let sorted = response.scores.sorted { $0.dayKey < $1.dayKey }
+            scores = .loaded(sorted)
+            model.cache.set(cacheKey, sorted)
         } catch {
             model.handle(error)
             scores = .failed(TodayStore.message(for: error))
@@ -74,6 +88,10 @@ final class TrendsStore {
     /// by ISO week client-side.
     private func loadWeekly() async {
         guard let model, weekly.value == nil else { return }
+        if let cached: WeeklyAverages = model.cache.get("trends:weekly") {
+            weekly = .loaded(cached)
+            return
+        }
         weekly = .loading
         let today = DayKeyMath.todayKey()
         do {
@@ -97,6 +115,7 @@ final class TrendsStore {
             model.handle(error)
             weekly = .failed(TodayStore.message(for: error))
         }
+        if let loaded = weekly.value { model.cache.set("trends:weekly", loaded) }
     }
 
     private func computedWeekly(_ api: APIClient, today: DayKey) async throws -> WeeklyAverages {
@@ -126,6 +145,10 @@ final class TrendsStore {
     /// One current-month calendar row per active habit.
     private func loadHeatmap() async {
         guard let model, heatmap.value == nil else { return }
+        if let cached: [HabitHeatRow] = model.cache.get("trends:heatmap") {
+            heatmap = .loaded(cached)
+            return
+        }
         heatmap = .loading
         do {
             let month = String(DayKeyMath.todayKey().prefix(7))
@@ -137,6 +160,7 @@ final class TrendsStore {
                 rows.append(HabitHeatRow(habit: habit, days: days.sorted { $0.dayKey < $1.dayKey }))
             }
             heatmap = .loaded(rows)
+            model.cache.set("trends:heatmap", rows)
         } catch {
             model.handle(error)
             heatmap = .failed(TodayStore.message(for: error))
@@ -164,13 +188,7 @@ struct TrendsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.lg) {
-                Picker("Range", selection: $range) {
-                    ForEach(TrendsRange.allCases) { range in
-                        Text(range.label).tag(range)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                ChipPicker(TrendsRange.allCases, selection: $range) { $0.label }
 
                 dailyScoreCard
                 weeklyAveragesCard
@@ -184,13 +202,14 @@ struct TrendsView: View {
         .background(Color.bgCanvas)
         .navigationTitle("Trends")
         #if os(iOS)
-        // Body lives inside Trends on iPhone (macOS reaches it via the sidebar).
+        // Metrics lives inside Trends on iPhone (macOS reaches it via the sidebar).
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink {
-                    BodyView()
+                    MetricsView()
+                        .navigationTitle("Metrics")
                 } label: {
-                    Label("Body", systemImage: "figure.arms.open")
+                    Label("Metrics", systemImage: "scalemass")
                 }
             }
         }
@@ -206,7 +225,7 @@ struct TrendsView: View {
             Task { await store.loadScores(range: range) }
         }
         .refreshable {
-            await store.load(range: range)
+            await store.load(range: range, force: true)
         }
     }
 

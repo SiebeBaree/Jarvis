@@ -260,11 +260,15 @@ public struct DayPayload: Codable, Sendable {
     public let weekNumber: Int?
     public let isReviewWeek: Bool
     public let block: BlockSummaryDTO?
+    /// Set when no block covers today but one starts later — the client
+    /// shows "starts <date>" instead of the plan-setup banner. Optional so
+    /// payloads from servers predating the field still decode.
+    public let upcomingBlock: BlockSummaryDTO?
     public let score: DaySnapshotDTO
-    public let tasksDue: [TaskDTO]
-    public let overdueTasks: [TaskDTO]
-    public let habits: [HabitTodayEntryDTO]
-    public let mood: MoodDTO?
+    public var tasksDue: [TaskDTO]
+    public var overdueTasks: [TaskDTO]
+    public var habits: [HabitTodayEntryDTO]
+    public var mood: MoodDTO?
     public let yesterdayMoodMissing: Bool
     /// Number of paused recurring tasks today. Optional so payloads from
     /// servers predating the field still decode (absent key → nil; treat as 0).

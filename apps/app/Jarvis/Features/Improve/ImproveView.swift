@@ -95,7 +95,7 @@ struct ImproveView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .refreshable { await store.load() }
+            .refreshable { await store.load(force: true) }
         }
     }
 

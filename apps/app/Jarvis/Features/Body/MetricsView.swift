@@ -20,8 +20,18 @@ final class MetricsStore {
         if self.model == nil { self.model = model }
     }
 
-    func load() async {
+    private struct Snapshot {
+        var types: [MetricTypeDTO]
+        var entries: [String: [MetricEntryDTO]]
+    }
+
+    func load(force: Bool = false) async {
         guard let model else { return }
+        if !force, let cached: Snapshot = model.cache.get("metrics") {
+            types = .loaded(cached.types)
+            entries = cached.entries
+            return
+        }
         if types.value == nil { types = .loading }
         do {
             let today = DayKeyMath.todayKey()
@@ -31,13 +41,14 @@ final class MetricsStore {
                 to: today,
             )
             let (typeList, entryList) = try await (typesResponse, entriesResponse)
-            types = .loaded(
-                typeList.metricTypes
-                    .filter { $0.archivedAt == nil }
-                    .sorted { $0.sortOrder < $1.sortOrder },
-            )
-            entries = Dictionary(grouping: entryList.entries, by: \.metricTypeId)
+            let visibleTypes = typeList.metricTypes
+                .filter { $0.archivedAt == nil }
+                .sorted { $0.sortOrder < $1.sortOrder }
+            let grouped = Dictionary(grouping: entryList.entries, by: \.metricTypeId)
                 .mapValues { $0.sorted { $0.dayKey < $1.dayKey } }
+            types = .loaded(visibleTypes)
+            entries = grouped
+            model.cache.set("metrics", Snapshot(types: visibleTypes, entries: grouped))
         } catch {
             model.handle(error)
             if types.value == nil {
@@ -73,7 +84,8 @@ final class MetricsStore {
         do {
             _ = try await operation(model.api)
             mutationError = nil
-            await load()
+            model.invalidateToday()
+            await load(force: true)
         } catch {
             model.handle(error)
             mutationError = TodayStore.message(for: error)
@@ -227,7 +239,7 @@ struct MetricsView: View {
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
         }
-        .refreshable { await store.load() }
+        .refreshable { await store.load(force: true) }
     }
 
     private var emptyState: some View {

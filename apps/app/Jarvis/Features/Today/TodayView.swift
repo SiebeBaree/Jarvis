@@ -50,6 +50,8 @@ struct TodayView: View {
         .background(Color.bgCanvas)
         .navigationTitle("Today")
         .toolbar {
+            // Settings lives in the sidebar on macOS; only iPhone needs the gear.
+            #if os(iOS)
             ToolbarItem(placement: .navigation) {
                 Button {
                     showSettings = true
@@ -58,7 +60,6 @@ struct TodayView: View {
                 }
                 .accessibilityLabel("Settings")
             }
-            #if os(iOS)
             // Trends (and Body inside it) + Improve live behind these on
             // iPhone; macOS reaches them via the sidebar.
             ToolbarItem(placement: .primaryAction) {
@@ -131,7 +132,11 @@ struct TodayView: View {
                     errorBanner(error)
                 }
                 if payload.block == nil {
-                    planSetupBanner
+                    if let upcoming = payload.upcomingBlock {
+                        upcomingBlockBanner(upcoming)
+                    } else {
+                        planSetupBanner
+                    }
                 }
                 BriefingSlot(payload: payload) // Stage 3: morning briefing card
                 scoreHeader(payload)
@@ -165,7 +170,7 @@ struct TodayView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .refreshable { await store.load() }
+        .refreshable { await store.load(force: true) }
     }
 
     private func errorState(_ message: String) -> some View {
@@ -255,6 +260,20 @@ struct TodayView: View {
             }
             .buttonStyle(.jarvisPrimary)
             .padding(.top, Space.xs)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    /// A block exists but hasn't started yet — no setup nagging.
+    private func upcomingBlockBanner(_ block: BlockSummaryDTO) -> some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Text("\"\(block.title)\" starts \(HabitDisplay.shortLabel(for: block.startDate))")
+                .font(.headlineJ)
+                .foregroundStyle(Color.textPrimary)
+            Text("Your plan is ready. Habits and mood score every day; block tasks and tactics begin with week 1.")
+                .font(.subheadJ)
+                .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()

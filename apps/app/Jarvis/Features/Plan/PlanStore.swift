@@ -30,12 +30,17 @@ final class PlanStore {
 
     // MARK: - Loading
 
-    func load() async {
+    func load(force: Bool = false) async {
         guard let model else { return }
+        if !force, let cached: CurrentBlockResponse = model.cache.get("blocks/current") {
+            content = .loaded(cached)
+            return
+        }
         if content.value == nil { content = .loading }
         do {
             let response = try await model.api.currentBlock()
             content = .loaded(response)
+            model.cache.set("blocks/current", response)
             tacticWeekOverrides = [:]
         } catch {
             model.handle(error)

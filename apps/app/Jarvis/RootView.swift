@@ -25,12 +25,12 @@ enum AppSection: String, CaseIterable, Identifiable {
     case plan
     case chat
     case trends
-    case body
+    case metrics
     case improve
 
     var id: String { rawValue }
 
-    /// iPhone tab bar (Trends/Body/Improve live behind Today's toolbar there).
+    /// iPhone tab bar (Trends/Metrics/Improve live behind Today's toolbar there).
     static let tabSections: [AppSection] = [.today, .tasks, .habits, .plan, .chat]
 
     /// macOS sidebar shows everything, grouped.
@@ -38,7 +38,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         (nil, [.today, .chat]),
         ("Plan", [.plan]),
         ("Track", [.tasks, .habits]),
-        ("Progress", [.trends, .body, .improve]),
+        ("Progress", [.trends, .improve, .metrics]),
     ]
 
     var title: String {
@@ -49,7 +49,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .plan: "Plan"
         case .chat: "Chat"
         case .trends: "Trends"
-        case .body: "Body"
+        case .metrics: "Metrics"
         case .improve: "Improve"
         }
     }
@@ -62,7 +62,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .plan: "map"
         case .chat: "bubble.left.and.text.bubble.right"
         case .trends: "chart.line.uptrend.xyaxis"
-        case .body: "figure.arms.open"
+        case .metrics: "scalemass"
         case .improve: "sparkles"
         }
     }
@@ -186,7 +186,10 @@ struct MainShell: View {
         case .plan: PlanView()
         case .chat: ChatView()
         case .trends: TrendsView()
-        case .body: BodyView()
+        case .metrics:
+            MetricsView()
+                .background(Color.bgCanvas)
+                .navigationTitle("Metrics")
         case .improve: ImproveView()
         }
     }

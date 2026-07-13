@@ -20,15 +20,9 @@ struct TasksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Segment", selection: $store.segment) {
-                ForEach(TasksStore.Segment.allCases) { segment in
-                    Text(segment.title).tag(segment)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, PageMargin.standard)
-            .padding(.vertical, Space.sm)
+            ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
+                .padding(.horizontal, PageMargin.standard)
+                .padding(.vertical, Space.sm)
 
             if let actionError = store.actionError {
                 inlineError(actionError)
@@ -218,7 +212,7 @@ struct TasksView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .refreshable { await store.fetch() }
+        .refreshable { await store.fetch(force: true) }
     }
 
     // MARK: - Rows & helpers
