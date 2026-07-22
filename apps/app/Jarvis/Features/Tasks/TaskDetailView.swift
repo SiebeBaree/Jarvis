@@ -101,6 +101,7 @@ struct TaskDetailView: View {
                 dueDateRow(for: task)
                 timeRow(for: task)
                 priorityRow(for: task)
+                categoryRow(for: task)
                 goalRow(for: task)
                 if task.templateId != nil {
                     repeatsRow
@@ -326,6 +327,38 @@ struct TaskDetailView: View {
                 }
             } label: {
                 PriorityFlag(task.priority.flagLevel)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+        }
+        .frame(minHeight: RowHeight.standard)
+    }
+
+    private func categoryRow(for task: TaskDTO) -> some View {
+        HStack(spacing: Space.md) {
+            propertyLabel("Category")
+            Spacer(minLength: 0)
+            Menu {
+                Button {
+                    Task { await patch(["categoryId": .null]) }
+                } label: {
+                    Label("None", systemImage: task.categoryId == nil ? "checkmark" : "circle.dashed")
+                }
+                ForEach(store.categories) { category in
+                    Button {
+                        Task { await patch(["categoryId": .string(category.id)]) }
+                    } label: {
+                        Label(category.name, systemImage: task.categoryId == category.id ? "checkmark" : "tag")
+                    }
+                }
+            } label: {
+                if let category = store.category(for: task.categoryId) {
+                    CategoryChip(category: category)
+                } else {
+                    Text("None")
+                        .font(.subheadJ)
+                        .foregroundStyle(Color.textTertiary)
+                }
             }
             .menuStyle(.button)
             .buttonStyle(.plain)

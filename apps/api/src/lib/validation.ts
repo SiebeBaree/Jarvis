@@ -176,6 +176,20 @@ export const checkinUploadQuerySchema = z.object({ dayKey: dayKeySchema });
 // ---------- account ----------
 export const accountResetSchema = z.object({ confirm: z.literal("RESET") });
 
+// ---------- task categories ----------
+export const taskCategoryCreateSchema = z.object({
+  name: z.string().min(1).max(60),
+  emoji: z.string().max(16).nullish(),
+  colorHex: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6,8}$/)
+    .nullish(),
+  sortOrder: z.number().int().optional(),
+});
+export const taskCategoryPatchSchema = taskCategoryCreateSchema.partial().extend({
+  archived: z.boolean().optional(),
+});
+
 // ---------- tasks ----------
 export const taskCreateSchema = z.object({
   title: z.string().min(1).max(300),
@@ -184,6 +198,7 @@ export const taskCreateSchema = z.object({
   dueTime: timeSchema.nullish(),
   priority: prioritySchema.optional(),
   goalId: z.string().uuid().nullish(),
+  categoryId: z.string().uuid().nullish(),
   parentTaskId: z.string().uuid().nullish(),
   sortOrder: z.number().int().optional(),
 });
@@ -196,6 +211,7 @@ export const taskPatchSchema = z
     dueTime: timeSchema.nullable().optional(),
     priority: prioritySchema.optional(),
     goalId: z.string().uuid().nullable().optional(),
+    categoryId: z.string().uuid().nullable().optional(),
     sortOrder: z.number().int().optional(),
     status: z.enum(["open", "cancelled"]).optional(), // done goes through /complete
   })
@@ -206,6 +222,7 @@ export const taskListQuerySchema = z.object({
   dueFrom: dayKeySchema.optional(),
   dueTo: dayKeySchema.optional(),
   goalId: z.string().uuid().optional(),
+  categoryId: z.string().uuid().optional(),
   status: z.enum(["open", "done", "cancelled"]).optional(),
 });
 
@@ -229,6 +246,7 @@ export const templateCreateSchema = z.object({
   notes: z.string().max(5000).nullish(),
   priority: prioritySchema.optional(),
   goalId: z.string().uuid().nullish(),
+  categoryId: z.string().uuid().nullish(),
   dueTime: timeSchema.nullish(),
   rule: recurrenceRuleSchema,
   startDate: dayKeySchema,
@@ -326,7 +344,7 @@ export const metricTypesQuerySchema = z.object({
   includeArchived: z.enum(["true", "false"]).optional(),
 });
 export const metricEntriesQuerySchema = z.object({
-  typeId: z.string().uuid(),
+  typeId: z.string().uuid().optional(), // absent = entries across all types
   from: dayKeySchema.optional(),
   to: dayKeySchema.optional(),
 });

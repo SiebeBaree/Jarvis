@@ -53,6 +53,7 @@ export async function materializeTemplates(
             notes: template.notes,
             priority: template.priority,
             goalId: template.goalId,
+            categoryId: template.categoryId,
             dueDate: dayKey,
             dueTime: template.dueTime,
             templateId: template.id,
@@ -94,6 +95,9 @@ export interface HabitTodayEntry {
   credit: number;
   pace: PaceStatus | null; // weekly_frequency only
   plannedToday: boolean;
+  /** Reps for the trailing 7 days (oldest first, ending on dayKey) — the
+   * backfill strip in the habits list. Can span the previous week. */
+  recentDays: { dayKey: DayKey; reps: number }[];
 }
 
 export interface DayPayload {
@@ -144,7 +148,7 @@ export async function buildDayPayload(
         orderBy: [asc(blocks.startDate)],
       });
 
-  const [dueTop, overdueTop, dayHabits, reps, mood, yesterdayMood] = await Promise.all([
+  const [dueTop, overdueTop, dayHabits, reps, recentReps, mood, yesterdayMood] = await Promise.all([
     db.query.tasks.findMany({
       where: and(eq(tasks.userId, userId), eq(tasks.dueDate, dayKey), isNull(tasks.parentTaskId)),
       orderBy: [asc(tasks.sortOrder), asc(tasks.createdAt)],
@@ -164,6 +168,7 @@ export async function buildDayPayload(
       : Promise.resolve([]),
     applicableHabits(userId, dayKey, settings),
     repCounts(userId, weekStart(dayKey), weekEnd(dayKey)),
+    repCounts(userId, addDays(dayKey, -6), dayKey),
     db.query.moodEntries.findFirst({
       where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, dayKey)),
     }),
@@ -202,8 +207,11 @@ export async function buildDayPayload(
   const hour = localHour(settings, now);
   const creditByHabit = new Map(snapshot.breakdown.habits.map((h) => [h.habitId, h.credit]));
 
+  const recentWindow = Array.from({ length: 7 }, (_, i) => addDays(dayKey, i - 6));
+
   const habitEntries: HabitTodayEntry[] = dayHabits.map((habit) => {
     const habitReps = reps.get(habit.id) ?? new Map<string, number>();
+    const habitRecent = recentReps.get(habit.id) ?? new Map<string, number>();
     const repsToday = habitReps.get(dayKey) ?? 0;
     let doneThroughDay = 0;
     let weekTotal = 0;
@@ -233,6 +241,7 @@ export async function buildDayPayload(
       plannedToday: habit.type !== "weekly_frequency" || habit.plannedDays.length === 0
         ? true
         : habit.plannedDays.includes(isoDay),
+      recentDays: recentWindow.map((day) => ({ dayKey: day, reps: habitRecent.get(day) ?? 0 })),
     };
   });
 

@@ -40,6 +40,8 @@ final class TasksStore {
     }
 
     var searchText = ""
+    /// Category filter (TickTick-style pages); nil = all categories.
+    var selectedCategoryId: String?
     /// Inline error from a mutation (fetch errors live in `state`).
     var actionError: String?
 
@@ -47,6 +49,7 @@ final class TasksStore {
     /// Open tasks without a due date (view "inbox"), merged into Upcoming.
     private(set) var noDateTasks: [TaskDTO] = []
     private(set) var goals: [GoalDTO] = []
+    private(set) var categories: [TaskCategoryDTO] = []
     /// Every task seen in any fetch, so the detail screen can start instantly.
     private(set) var cache: [String: TaskDTO] = [:]
 
@@ -61,6 +64,11 @@ final class TasksStore {
     func goalTitle(for goalId: String?) -> String? {
         guard let goalId else { return nil }
         return goals.first { $0.id == goalId }?.title
+    }
+
+    func category(for categoryId: String?) -> TaskCategoryDTO? {
+        guard let categoryId else { return nil }
+        return categories.first { $0.id == categoryId }
     }
 
     func task(withId id: String) -> TaskDTO? {
@@ -126,6 +134,68 @@ final class TasksStore {
         }
     }
 
+    func fetchCategories(force: Bool = false) async {
+        guard let model else { return }
+        if !force, let cached: [TaskCategoryDTO] = model.cache.get("taskCategories") {
+            categories = cached
+            return
+        }
+        if let response = try? await model.api.taskCategories() {
+            categories = response.categories
+            model.cache.set("taskCategories", response.categories)
+        }
+    }
+
+    // MARK: - Category CRUD
+
+    @discardableResult
+    func createCategory(name: String) async -> TaskCategoryDTO? {
+        guard let model else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            let created = try await model.api.createTaskCategory(
+                TaskCategoryCreateRequest(name: trimmed, colorHex: CategoryPalette.next(after: categories.count)),
+            )
+            actionError = nil
+            await fetchCategories(force: true)
+            return created
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func renameCategory(_ category: TaskCategoryDTO, to name: String) async {
+        guard let model else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != category.name else { return }
+        do {
+            _ = try await model.api.patchTaskCategory(id: category.id, ["name": .string(trimmed)])
+            actionError = nil
+            await fetchCategories(force: true)
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+        }
+    }
+
+    /// Deletes the category; its tasks survive with no category.
+    func deleteCategory(_ category: TaskCategoryDTO) async {
+        guard let model else { return }
+        do {
+            _ = try await model.api.deleteTaskCategory(id: category.id)
+            if selectedCategoryId == category.id { selectedCategoryId = nil }
+            actionError = nil
+            await fetchCategories(force: true)
+            await fetch(force: true)
+        } catch {
+            model.handle(error)
+            actionError = error.localizedDescription
+        }
+    }
+
     /// Refetch a single task by scanning the list views (the API has no
     /// GET /tasks/:id). Checks "all" first, then "done".
     @discardableResult
@@ -153,7 +223,8 @@ final class TasksStore {
     // MARK: - Derived groups
 
     private func matchesSearch(_ task: TaskDTO) -> Bool {
-        searchText.isEmpty || task.title.localizedCaseInsensitiveContains(searchText)
+        let inCategory = selectedCategoryId == nil || task.categoryId == selectedCategoryId
+        return inCategory && (searchText.isEmpty || task.title.localizedCaseInsensitiveContains(searchText))
     }
 
     private func priorityRank(_ priority: TaskPriority) -> Int {

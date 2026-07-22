@@ -1,4 +1,5 @@
-// Metric entries for one type, ascending by day — feeds the Body charts.
+// Metric entries ascending by day — feeds the Body charts. With typeId one
+// type's entries; without, every type's (the Body screen loads all at once).
 
 import { NextResponse } from "next/server";
 import { and, asc, eq, gte, lte, type SQL } from "drizzle-orm";
@@ -15,12 +16,11 @@ export const GET = handler(async (request: Request) => {
   const ctx = await requireAuth(request);
   const query = parseQuery(request, metricEntriesQuerySchema);
 
-  await loadMetricType(ctx.userId, query.typeId); // 404 when not owned
-
-  const conditions: SQL[] = [
-    eq(metricEntries.userId, ctx.userId),
-    eq(metricEntries.metricTypeId, query.typeId),
-  ];
+  const conditions: SQL[] = [eq(metricEntries.userId, ctx.userId)];
+  if (query.typeId) {
+    await loadMetricType(ctx.userId, query.typeId); // 404 when not owned
+    conditions.push(eq(metricEntries.metricTypeId, query.typeId));
+  }
   if (query.from) conditions.push(gte(metricEntries.dayKey, query.from));
   if (query.to) conditions.push(lte(metricEntries.dayKey, query.to));
 

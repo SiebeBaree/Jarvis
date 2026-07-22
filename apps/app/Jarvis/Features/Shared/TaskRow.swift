@@ -17,6 +17,7 @@ extension TaskPriority {
 struct TaskRow: View {
     let task: TaskDTO
     var goalTitle: String? = nil
+    var category: TaskCategoryDTO? = nil
     var overdueLabel: String? = nil
     var onToggle: () -> Void
     var onTap: () -> Void
@@ -81,6 +82,9 @@ struct TaskRow: View {
                 Text("\(fraction.done)/\(fraction.total)")
                     .font(.monoJ)
                     .foregroundStyle(Color.textSecondary)
+            }
+            if let category {
+                CategoryChip(category: category)
             }
             if let goalTitle {
                 GoalChip(goalTitle)

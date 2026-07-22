@@ -72,3 +72,24 @@ improvement areas never asked about). Decisions confirmed with the user:
 - Scoring, mood (one 0–100/day), Trends, Tasks, Habits, Body are unchanged.
 - E2E-verified 2026-07-12 (wizard flows, check-in upload + vision commentary,
   seeding memories, post-turn extraction, memory-grounded answers, reset).
+
+## 2026-07-21 — task categories, habit backfill strip, single-arc score ring
+
+- **Task categories** (`task_categories` table + `categoryId` on tasks and
+  recurrence templates): TickTick-style lists (work/personal/household...),
+  purely organizational, never enter scoring. CRUD at `/task-categories`;
+  filter chips ("pages") in the Tasks tab; pickers in the task editor, task
+  detail, quick-add composer, and recurring-template editor. Deleting a
+  category keeps its tasks (FK `set null`). Deliberately separate from
+  `areas` (life areas stay a 12WY concept).
+- **Habit backfill strip**: the Today payload's habit entries now carry
+  `recentDays` (trailing 7 days of reps); habit cards in the Habits tab show
+  a tappable 7-day strip so forgotten days can be checked off up to a week
+  later. `POST /habits/:id/log {dayKey}` already existed; the server
+  recomputes (and re-finalizes) that day's score on backfill.
+- **Score ring redrawn as a single arc** (deviation from spec §B5.1's
+  three-arc ring): scoring math is untouched (renormalization stays); only
+  the display changed. The ring now draws one continuous arc from 12
+  o'clock filling total%, because the three weight-proportional arcs made a
+  partial day read as disconnected green fragments. The per-component
+  detail lives in the bars next to the ring and in the breakdown sheet.

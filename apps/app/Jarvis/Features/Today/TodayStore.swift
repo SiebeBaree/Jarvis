@@ -88,12 +88,14 @@ final class TodayStore {
         await run(rollbackTo: original) { try await $0.patchTask(id: task.id, ["dueDate": .string(dayKey)]) }
     }
 
-    func createQuickTask(title: String, dueDate: String?, priority: TaskPriority) async {
+    func createQuickTask(title: String, dueDate: String?, priority: TaskPriority, categoryId: String? = nil) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         // Creation needs the server-issued id — no optimistic row.
         await run(rollbackTo: nil) {
-            try await $0.createTask(TaskCreateRequest(title: trimmed, dueDate: dueDate, priority: priority))
+            try await $0.createTask(
+                TaskCreateRequest(title: trimmed, dueDate: dueDate, priority: priority, categoryId: categoryId),
+            )
         }
     }
 

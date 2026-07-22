@@ -22,6 +22,10 @@ struct TaskEditorView: View {
     @State private var dueTime: Date = .now
     @State private var priority: TaskPriority = .medium
     @State private var goalId: String?
+    @State private var categories: [TaskCategoryDTO] = []
+    @State private var categoryId: String?
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
     @State private var repeats = false
     @State private var rule = RecurrenceRuleDTO(freq: "daily", interval: 1)
     @State private var isSaving = false
@@ -61,6 +65,19 @@ struct TaskEditorView: View {
                         Text("P3 Low").tag(TaskPriority.low)
                     }
                     .pickerStyle(.segmented)
+
+                    Picker("Category", selection: $categoryId) {
+                        Text("None").tag(String?.none)
+                        ForEach(categories) { category in
+                            Text(categoryLabel(category)).tag(Optional(category.id))
+                        }
+                    }
+                    Button("New category…") {
+                        newCategoryName = ""
+                        showNewCategoryAlert = true
+                    }
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.accentPrimary)
 
                     Picker("Goal", selection: $goalId) {
                         Text("None").tag(String?.none)
@@ -119,10 +136,50 @@ struct TaskEditorView: View {
                 dueTime = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
                 titleFocused = true
             }
+            .task {
+                if let response = try? await model.api.taskCategories() {
+                    categories = response.categories
+                }
+            }
+            .alert("New category", isPresented: $showNewCategoryAlert) {
+                TextField("Name", text: $newCategoryName)
+                Button("Create") { createCategory() }
+                Button("Cancel", role: .cancel) { newCategoryName = "" }
+            } message: {
+                Text("e.g. Work, Personal, Household")
+            }
         }
         #if os(macOS)
         .frame(minWidth: 440, minHeight: 540)
         #endif
+    }
+
+    private func categoryLabel(_ category: TaskCategoryDTO) -> String {
+        if let emoji = category.emoji, !emoji.isEmpty {
+            return "\(emoji) \(category.name)"
+        }
+        return category.name
+    }
+
+    private func createCategory() {
+        let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        newCategoryName = ""
+        guard !trimmed.isEmpty else { return }
+        Task {
+            do {
+                let created = try await model.api.createTaskCategory(
+                    TaskCategoryCreateRequest(
+                        name: trimmed,
+                        colorHex: CategoryPalette.next(after: categories.count),
+                    ),
+                )
+                categories.append(created)
+                categoryId = created.id
+            } catch {
+                model.handle(error)
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func save() {
@@ -143,6 +200,7 @@ struct TaskEditorView: View {
                             notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                             priority: priority,
                             goalId: goalId,
+                            categoryId: categoryId,
                             dueTime: timeString,
                             rule: normalizedRule(),
                             startDate: dayKey,
@@ -157,6 +215,7 @@ struct TaskEditorView: View {
                             dueTime: timeString,
                             priority: priority,
                             goalId: goalId,
+                            categoryId: categoryId,
                         ),
                     )
                 }

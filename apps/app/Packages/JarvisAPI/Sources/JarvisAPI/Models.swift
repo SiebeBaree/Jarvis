@@ -56,6 +56,8 @@ public struct TaskRowDTO: Codable, Sendable, Identifiable, Equatable {
     public let status: TaskStatus
     public let completedAt: String?
     public let goalId: String?
+    /// Optional so payloads from servers predating categories decode.
+    public let categoryId: String?
     public let parentTaskId: String?
     public let templateId: String?
     public let sortOrder: Int
@@ -71,6 +73,8 @@ public struct TaskDTO: Codable, Sendable, Identifiable, Equatable {
     public let status: TaskStatus
     public let completedAt: String?
     public let goalId: String?
+    /// Optional so payloads from servers predating categories decode.
+    public let categoryId: String?
     public let parentTaskId: String?
     public let templateId: String?
     public let sortOrder: Int
@@ -79,6 +83,22 @@ public struct TaskDTO: Codable, Sendable, Identifiable, Equatable {
 
 public struct TaskListResponse: Codable, Sendable {
     public let tasks: [TaskDTO]
+}
+
+// MARK: - Task categories
+
+/// TickTick-style task list/category — purely organizational.
+public struct TaskCategoryDTO: Codable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let emoji: String?
+    public let colorHex: String?
+    public let sortOrder: Int
+    public let archivedAt: String?
+}
+
+public struct TaskCategoryListResponse: Codable, Sendable {
+    public let categories: [TaskCategoryDTO]
 }
 
 // MARK: - Recurrence templates
@@ -103,6 +123,8 @@ public struct RecurrenceTemplateDTO: Codable, Sendable, Identifiable, Equatable 
     public let notes: String?
     public let priority: TaskPriority
     public let goalId: String?
+    /// Optional so payloads from servers predating categories decode.
+    public let categoryId: String?
     public let dueTime: String?
     public let rule: RecurrenceRuleDTO
     public let startDate: DayKey
@@ -150,6 +172,18 @@ public struct PaceDTO: Codable, Sendable, Equatable {
     public let by: Int?
 }
 
+/// One day of the trailing-7-day backfill strip.
+public struct HabitRecentDayDTO: Codable, Sendable, Identifiable, Equatable {
+    public var id: String { dayKey }
+    public let dayKey: DayKey
+    public let reps: Int
+
+    public init(dayKey: DayKey, reps: Int) {
+        self.dayKey = dayKey
+        self.reps = reps
+    }
+}
+
 public struct HabitTodayEntryDTO: Codable, Sendable, Identifiable, Equatable {
     public var id: String { habit.id }
     public let habit: HabitDTO
@@ -159,6 +193,9 @@ public struct HabitTodayEntryDTO: Codable, Sendable, Identifiable, Equatable {
     public let credit: Double
     public let pace: PaceDTO?
     public let plannedToday: Bool
+    /// Reps for the trailing 7 days (oldest first, ending today). Optional so
+    /// payloads from servers predating the field decode.
+    public let recentDays: [HabitRecentDayDTO]?
 }
 
 public struct HabitLogResponse: Codable, Sendable {

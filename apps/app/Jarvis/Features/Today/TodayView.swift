@@ -17,6 +17,8 @@ struct TodayView: View {
     @State private var newTaskTitle = ""
     @State private var quickDueChoice: QuickDueChoice = .today
     @State private var quickPriority: TaskPriority = .medium
+    @State private var quickCategories: [TaskCategoryDTO] = []
+    @State private var quickCategoryId: String?
     @State private var showQuickEditor = false
     @State private var quickEditorGoals: [GoalDTO] = []
     @State private var detailRoute: HabitDetailRoute?
@@ -312,14 +314,7 @@ struct TodayView: View {
         let feelFill = score.feelPoints.map { $0 / max(w.feel, 1) }
 
         return HStack(spacing: Space.xl) {
-            ScoreRing(
-                size: 120,
-                weights: w,
-                taskFill: score.taskPoints.map { $0 / max(w.tasks, 1) },
-                habitFill: score.habitPoints.map { $0 / max(w.habits, 1) },
-                feelFill: feelFill,
-                total: score.total,
-            )
+            ScoreRing(size: 120, total: score.total)
             VStack(alignment: .leading, spacing: Space.md) {
                 componentRow(label: "Tasks", points: score.taskPoints, weight: w.tasks, color: .accentPrimary)
                 componentRow(label: "Habits", points: score.habitPoints, weight: w.habits, color: .success)
@@ -531,6 +526,7 @@ struct TodayView: View {
                 HStack(spacing: Space.sm) {
                     quickDueChip
                     quickPriorityChip
+                    quickCategoryChip
                     Spacer(minLength: Space.sm)
                     Button("More…") { openFullEditor() }
                         .buttonStyle(.jarvisGhost)
@@ -543,7 +539,13 @@ struct TodayView: View {
                 isAddingTask = true
                 quickDueChoice = .today
                 quickPriority = .medium
+                quickCategoryId = nil
                 addTaskFocused = true
+                Task {
+                    if let response = try? await model.api.taskCategories() {
+                        quickCategories = response.categories
+                    }
+                }
             } label: {
                 Text("+ Add task")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -594,6 +596,36 @@ struct TodayView: View {
         .accessibilityLabel("Priority: \(quickPriority.flagLevel.label)")
     }
 
+    @ViewBuilder
+    private var quickCategoryChip: some View {
+        if !quickCategories.isEmpty {
+            Menu {
+                Button("None") { quickCategoryId = nil }
+                ForEach(quickCategories) { category in
+                    Button(category.name) { quickCategoryId = category.id }
+                }
+            } label: {
+                HStack(spacing: Space.xs) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 10))
+                    Text(quickCategories.first(where: { $0.id == quickCategoryId })?.name ?? "Category")
+                        .font(.captionJ)
+                }
+                .foregroundStyle(quickCategoryId == nil ? Color.textSecondary : Color.accentPrimary)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, 3)
+                .background(quickCategoryId == nil ? Color.bgSubtle : Color.accentSubtle, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(
+                "Category: \(quickCategories.first(where: { $0.id == quickCategoryId })?.name ?? "none")",
+            )
+        }
+    }
+
     /// "More…" hands the typed title to the full editor (goals fetched lazily).
     private func openFullEditor() {
         Task {
@@ -615,9 +647,12 @@ struct TodayView: View {
             }
         }()
         let priority = quickPriority
+        let categoryId = quickCategoryId
         newTaskTitle = ""
         isAddingTask = false
-        Task { await store.createQuickTask(title: title, dueDate: dueDate, priority: priority) }
+        Task {
+            await store.createQuickTask(title: title, dueDate: dueDate, priority: priority, categoryId: categoryId)
+        }
     }
 
     private var heroEmptyState: some View {

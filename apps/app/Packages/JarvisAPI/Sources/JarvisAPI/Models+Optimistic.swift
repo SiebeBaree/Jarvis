@@ -20,6 +20,7 @@ extension TaskDTO {
                 ? ISO8601DateFormatter().string(from: .now)
                 : nil,
             goalId: goalId,
+            categoryId: categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
             sortOrder: sortOrder,
@@ -29,12 +30,14 @@ extension TaskDTO {
 }
 
 extension HabitTodayEntryDTO {
-    /// A copy with reps adjusted by `delta` (today + week totals, floored at
-    /// 0 and capped at the daily target for daily/multi-daily habits).
+    /// A copy with today's reps adjusted by `delta` (today + week totals,
+    /// floored at 0 and capped at the daily target for daily/multi-daily).
     public func adjustingReps(by delta: Int) -> HabitTodayEntryDTO {
         let dailyCap = habit.type == .weeklyFrequency ? Int.max : habit.targetReps
         let newToday = min(max(repsToday + delta, 0), dailyCap)
         let applied = newToday - repsToday
+        guard applied != 0 else { return self }
+        let today = recentDays?.last?.dayKey
         return HabitTodayEntryDTO(
             habit: habit,
             repsToday: newToday,
@@ -43,7 +46,37 @@ extension HabitTodayEntryDTO {
             credit: credit,
             pace: pace,
             plannedToday: plannedToday,
+            recentDays: today.map { adjustedRecentDays(by: applied, on: $0) } ?? recentDays,
         )
+    }
+
+    /// A copy with reps on a specific past day (from the 7-day strip)
+    /// adjusted by `delta`. `countsInWeek` says whether that day falls in the
+    /// current score week, so the week total tracks it.
+    public func adjustingReps(by delta: Int, on dayKey: DayKey, countsInWeek: Bool) -> HabitTodayEntryDTO {
+        let isToday = recentDays?.last?.dayKey == dayKey
+        if isToday { return adjustingReps(by: delta) }
+
+        let current = recentDays?.first(where: { $0.dayKey == dayKey })?.reps ?? 0
+        let dailyCap = habit.type == .weeklyFrequency ? Int.max : habit.targetReps
+        let applied = min(max(current + delta, 0), dailyCap) - current
+        guard applied != 0 else { return self }
+        return HabitTodayEntryDTO(
+            habit: habit,
+            repsToday: repsToday,
+            doneThroughDay: countsInWeek ? max(doneThroughDay + applied, 0) : doneThroughDay,
+            weekTotal: countsInWeek ? max(weekTotal + applied, 0) : weekTotal,
+            credit: credit,
+            pace: pace,
+            plannedToday: plannedToday,
+            recentDays: adjustedRecentDays(by: applied, on: dayKey),
+        )
+    }
+
+    private func adjustedRecentDays(by applied: Int, on dayKey: DayKey) -> [HabitRecentDayDTO]? {
+        recentDays?.map {
+            $0.dayKey == dayKey ? HabitRecentDayDTO(dayKey: $0.dayKey, reps: max($0.reps + applied, 0)) : $0
+        }
     }
 }
 

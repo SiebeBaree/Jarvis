@@ -17,6 +17,11 @@ struct TasksView: View {
     @State private var showingEditor = false
     @State private var showingRecurring = false
     @State private var showSearch = false
+    @State private var showNewCategoryAlert = false
+    @State private var newCategoryName = ""
+    @State private var renameCategoryTarget: TaskCategoryDTO?
+    @State private var renameCategoryName = ""
+    @State private var deleteCategoryTarget: TaskCategoryDTO?
     @FocusState private var searchFocused: Bool
     #if os(macOS)
     @State private var selectedTaskId: String?
@@ -28,6 +33,7 @@ struct TasksView: View {
         List {
             Group {
                 controlsRow
+                categoryChips
                 if showSearch {
                     searchField
                 }
@@ -95,8 +101,57 @@ struct TasksView: View {
         #endif
         .task {
             store.bind(model)
-            await store.fetchGoals()
+            async let goalsTask: Void = store.fetchGoals()
+            async let categoriesTask: Void = store.fetchCategories()
+            _ = await (goalsTask, categoriesTask)
             await store.fetch()
+        }
+        .alert("New category", isPresented: $showNewCategoryAlert) {
+            TextField("Name", text: $newCategoryName)
+            Button("Create") {
+                let name = newCategoryName
+                newCategoryName = ""
+                Task {
+                    if let created = await store.createCategory(name: name) {
+                        store.selectedCategoryId = created.id
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { newCategoryName = "" }
+        } message: {
+            Text("e.g. Work, Personal, Household")
+        }
+        .alert(
+            "Rename category",
+            isPresented: Binding(
+                get: { renameCategoryTarget != nil },
+                set: { if !$0 { renameCategoryTarget = nil } },
+            ),
+            presenting: renameCategoryTarget,
+        ) { category in
+            TextField("Name", text: $renameCategoryName)
+            Button("Rename") {
+                let name = renameCategoryName
+                Task { await store.renameCategory(category, to: name) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            EmptyView()
+        }
+        .confirmationDialog(
+            "Delete category?",
+            isPresented: Binding(
+                get: { deleteCategoryTarget != nil },
+                set: { if !$0 { deleteCategoryTarget = nil } },
+            ),
+            presenting: deleteCategoryTarget,
+        ) { category in
+            Button("Delete \(category.name)", role: .destructive) {
+                Task { await store.deleteCategory(category) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Tasks in this category are kept — they just lose the category.")
         }
     }
 
@@ -117,6 +172,75 @@ struct TasksView: View {
             searchToggle
         }
         .padding(.top, Space.xs)
+    }
+
+    // MARK: - Category pages (TickTick-style filter chips)
+
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Space.sm) {
+                categoryChip(title: "All", isSelected: store.selectedCategoryId == nil, dotColor: nil) {
+                    store.selectedCategoryId = nil
+                }
+                ForEach(store.categories) { category in
+                    categoryChip(
+                        title: category.name,
+                        isSelected: store.selectedCategoryId == category.id,
+                        dotColor: Color(hexString: category.colorHex) ?? .textTertiary,
+                    ) {
+                        store.selectedCategoryId = store.selectedCategoryId == category.id ? nil : category.id
+                    }
+                    .contextMenu {
+                        Button("Rename") {
+                            renameCategoryName = category.name
+                            renameCategoryTarget = category
+                        }
+                        Button("Delete", role: .destructive) {
+                            deleteCategoryTarget = category
+                        }
+                    }
+                }
+                Button {
+                    newCategoryName = ""
+                    showNewCategoryAlert = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.textSecondary)
+                        .padding(.horizontal, Space.sm)
+                        .padding(.vertical, 6)
+                        .background(Color.bgSubtle, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New category")
+            }
+        }
+    }
+
+    private func categoryChip(
+        title: String,
+        isSelected: Bool,
+        dotColor: Color?,
+        action: @escaping () -> Void,
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Space.xs) {
+                if let dotColor {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 6, height: 6)
+                }
+                Text(title)
+                    .font(.captionJ)
+            }
+            .foregroundStyle(isSelected ? Color.accentPrimary : Color.textSecondary)
+            .padding(.horizontal, Space.md)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Search (inline — the system .searchable forces heavy
@@ -282,6 +406,8 @@ struct TasksView: View {
         TaskRow(
             task: task,
             goalTitle: store.goalTitle(for: task.goalId),
+            // Hide the chip while filtering on that category — pure noise then.
+            category: store.selectedCategoryId == nil ? store.category(for: task.categoryId) : nil,
             overdueLabel: overdueLabel,
             onToggle: {
                 Task { await store.toggleComplete(task) }

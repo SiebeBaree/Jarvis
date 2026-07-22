@@ -9,6 +9,7 @@ struct RecurringTasksView: View {
 
     @State private var state: LoadState<[RecurrenceTemplateDTO]> = .idle
     @State private var goals: [GoalDTO] = []
+    @State private var categories: [TaskCategoryDTO] = []
     @State private var editing: RecurrenceTemplateDTO?
     @State private var pendingDelete: RecurrenceTemplateDTO?
     @State private var actionError: String?
@@ -55,7 +56,7 @@ struct RecurringTasksView: View {
         .background(Color.bgCanvas)
         .navigationTitle("Recurring tasks")
         .sheet(item: $editing) { template in
-            TemplateEditorSheet(template: template, goals: goals) {
+            TemplateEditorSheet(template: template, goals: goals, categories: categories) {
                 await fetch()
             }
         }
@@ -80,6 +81,9 @@ struct RecurringTasksView: View {
             await fetch()
             if let response = try? await model.api.goals() {
                 goals = response.goals
+            }
+            if let response = try? await model.api.taskCategories() {
+                categories = response.categories
             }
         }
     }
@@ -208,11 +212,13 @@ private struct TemplateEditorSheet: View {
 
     let template: RecurrenceTemplateDTO
     let goals: [GoalDTO]
+    let categories: [TaskCategoryDTO]
     var onSaved: () async -> Void
 
     @State private var title = ""
     @State private var priority: TaskPriority = .medium
     @State private var goalId: String?
+    @State private var categoryId: String?
     @State private var hasTime = false
     @State private var dueTime: Date = .now
     @State private var showInReviewWeek = false
@@ -234,6 +240,13 @@ private struct TemplateEditorSheet: View {
                         Text("P3 Low").tag(TaskPriority.low)
                     }
                     .pickerStyle(.segmented)
+
+                    Picker("Category", selection: $categoryId) {
+                        Text("None").tag(String?.none)
+                        ForEach(categories) { category in
+                            Text(category.name).tag(Optional(category.id))
+                        }
+                    }
 
                     Picker("Goal", selection: $goalId) {
                         Text("None").tag(String?.none)
@@ -282,6 +295,7 @@ private struct TemplateEditorSheet: View {
                 title = template.title
                 priority = template.priority
                 goalId = template.goalId
+                categoryId = template.categoryId
                 showInReviewWeek = template.showInReviewWeek ?? false
                 rule = template.rule
                 if let time = template.dueTime {
@@ -311,6 +325,7 @@ private struct TemplateEditorSheet: View {
                     "title": .string(trimmed),
                     "priority": .string(priority.rawValue),
                     "goalId": goalId.map { .string($0) } ?? .null,
+                    "categoryId": categoryId.map { .string($0) } ?? .null,
                     "rule": rule.jsonValue,
                     "showInReviewWeek": .bool(showInReviewWeek),
                 ]

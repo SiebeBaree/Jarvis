@@ -156,6 +156,21 @@ export const goals = pgTable("goals", {
 }, (t) => [index("goals_user_block_idx").on(t.userId, t.blockId)]);
 
 // ---------- tasks ----------
+// User-defined task categories (work, personal, household...) — TickTick-style
+// lists: purely organizational, never enter scoring.
+export const taskCategories = pgTable("task_categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  emoji: varchar("emoji", { length: 16 }),
+  colorHex: varchar("color_hex", { length: 9 }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("task_categories_user_name_uq").on(t.userId, t.name)]);
+
 export type RecurrenceRule =
   | { freq: "daily"; interval: number } // every N days
   | { freq: "weekly"; interval: number; byWeekday: number[] } // ISO weekdays 1-7
@@ -170,6 +185,7 @@ export const recurrenceTemplates = pgTable("recurrence_templates", {
   notes: text("notes"),
   priority: taskPriority("priority").notNull().default("medium"),
   goalId: uuid("goal_id").references(() => goals.id, { onDelete: "set null" }),
+  categoryId: uuid("category_id").references(() => taskCategories.id, { onDelete: "set null" }),
   dueTime: time("due_time"),
   rule: jsonb("rule").$type<RecurrenceRule>().notNull(),
   startDate: date("start_date").notNull(),
@@ -195,6 +211,7 @@ export const tasks = pgTable("tasks", {
   status: taskStatus("status").notNull().default("open"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   goalId: uuid("goal_id").references(() => goals.id, { onDelete: "set null" }),
+  categoryId: uuid("category_id").references(() => taskCategories.id, { onDelete: "set null" }),
   parentTaskId: uuid("parent_task_id").references((): AnyPgColumn => tasks.id, {
     onDelete: "cascade",
   }),
@@ -207,6 +224,7 @@ export const tasks = pgTable("tasks", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("tasks_user_due_idx").on(t.userId, t.dueDate, t.status),
+  index("tasks_user_category_idx").on(t.userId, t.categoryId),
   index("tasks_parent_idx").on(t.parentTaskId),
   uniqueIndex("tasks_template_occurrence_uq")
     .on(t.templateId, t.templateDate)

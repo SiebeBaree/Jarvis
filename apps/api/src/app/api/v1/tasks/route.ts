@@ -48,6 +48,7 @@ export const GET = handler(async (request: Request) => {
   if (query.dueFrom) conditions.push(gte(tasks.dueDate, query.dueFrom));
   if (query.dueTo) conditions.push(lte(tasks.dueDate, query.dueTo));
   if (query.goalId) conditions.push(eq(tasks.goalId, query.goalId));
+  if (query.categoryId) conditions.push(eq(tasks.categoryId, query.categoryId));
   if (query.status) conditions.push(eq(tasks.status, query.status));
 
   const rows = await db.query.tasks.findMany({ where: and(...conditions), orderBy, limit });
@@ -78,6 +79,7 @@ export const POST = handler(async (request: Request) => {
       dueTime: body.dueTime ?? null,
       priority: body.priority ?? "medium",
       goalId: body.goalId ?? null,
+      categoryId: body.categoryId ?? null,
       parentTaskId: body.parentTaskId ?? null,
       sortOrder: body.sortOrder ?? 0,
     })

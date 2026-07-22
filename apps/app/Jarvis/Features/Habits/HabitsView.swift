@@ -175,32 +175,38 @@ struct HabitsView: View {
         let entry = store.todayEntry(for: habit.id)
         let stats = store.stats[habit.id]
 
-        return HStack(spacing: Space.md) {
-            Image(systemName: HabitDisplay.icon(for: habit))
-                .font(.system(size: 16))
-                .foregroundStyle(Color.textSecondary)
-                .frame(width: 32, height: 32)
-                .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        return VStack(alignment: .leading, spacing: Space.md) {
+            HStack(spacing: Space.md) {
+                Image(systemName: HabitDisplay.icon(for: habit))
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.textSecondary)
+                    .frame(width: 32, height: 32)
+                    .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(habit.name)
-                    .font(.headlineJ)
-                    .foregroundStyle(Color.textPrimary)
-                    .lineLimit(1)
-                HStack(spacing: Space.sm) {
-                    Text(HabitDisplay.typeCaption(for: habit))
-                        .font(.subheadJ)
-                        .foregroundStyle(Color.textSecondary)
-                    if let stats {
-                        StreakChip(count: stats.streak.current, unit: stats.streak.unit)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(habit.name)
+                        .font(.headlineJ)
+                        .foregroundStyle(Color.textPrimary)
+                        .lineLimit(1)
+                    HStack(spacing: Space.sm) {
+                        Text(HabitDisplay.typeCaption(for: habit))
+                            .font(.subheadJ)
+                            .foregroundStyle(Color.textSecondary)
+                        if let stats {
+                            StreakChip(count: stats.streak.current, unit: stats.streak.unit)
+                        }
                     }
+                }
+
+                Spacer(minLength: Space.sm)
+
+                if let entry {
+                    habitControl(entry)
                 }
             }
 
-            Spacer(minLength: Space.sm)
-
-            if let entry {
-                habitControl(entry)
+            if let entry, let recentDays = entry.recentDays, !recentDays.isEmpty {
+                RecentDaysStrip(entry: entry, recentDays: recentDays, store: store)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

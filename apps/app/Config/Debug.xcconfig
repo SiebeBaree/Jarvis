@@ -1,3 +1,7 @@
 // Debug builds talk to the local dev API.
 // For a physical iPhone on the same network, replace localhost with the Mac's LAN IP.
 API_BASE_URL = http:/$()/localhost:3000
+
+// ...except on a physical iPhone, where "localhost" is the phone itself.
+// Device Debug builds hit production so a plugged-in phone just works.
+API_BASE_URL[sdk=iphoneos*] = https:/$()/api.jarvis.baree.be

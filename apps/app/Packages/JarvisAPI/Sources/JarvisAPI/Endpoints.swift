@@ -33,6 +33,7 @@ public struct TaskCreateRequest: Encodable, Sendable {
     public var dueTime: String?
     public var priority: TaskPriority?
     public var goalId: String?
+    public var categoryId: String?
     public var parentTaskId: String?
 
     public init(
@@ -42,6 +43,7 @@ public struct TaskCreateRequest: Encodable, Sendable {
         dueTime: String? = nil,
         priority: TaskPriority? = nil,
         goalId: String? = nil,
+        categoryId: String? = nil,
         parentTaskId: String? = nil,
     ) {
         self.title = title
@@ -50,6 +52,7 @@ public struct TaskCreateRequest: Encodable, Sendable {
         self.dueTime = dueTime
         self.priority = priority
         self.goalId = goalId
+        self.categoryId = categoryId
         self.parentTaskId = parentTaskId
     }
 }
@@ -59,6 +62,7 @@ public struct TemplateCreateRequest: Encodable, Sendable {
     public var notes: String?
     public var priority: TaskPriority?
     public var goalId: String?
+    public var categoryId: String?
     public var dueTime: String?
     public var rule: RecurrenceRuleDTO
     public var startDate: DayKey
@@ -69,6 +73,7 @@ public struct TemplateCreateRequest: Encodable, Sendable {
         notes: String? = nil,
         priority: TaskPriority? = nil,
         goalId: String? = nil,
+        categoryId: String? = nil,
         dueTime: String? = nil,
         rule: RecurrenceRuleDTO,
         startDate: DayKey,
@@ -78,10 +83,22 @@ public struct TemplateCreateRequest: Encodable, Sendable {
         self.notes = notes
         self.priority = priority
         self.goalId = goalId
+        self.categoryId = categoryId
         self.dueTime = dueTime
         self.rule = rule
         self.startDate = startDate
         self.endDate = endDate
+    }
+}
+
+public struct TaskCategoryCreateRequest: Encodable, Sendable {
+    public let name: String
+    public let emoji: String?
+    public let colorHex: String?
+    public init(name: String, emoji: String? = nil, colorHex: String? = nil) {
+        self.name = name
+        self.emoji = emoji
+        self.colorHex = colorHex
     }
 }
 
@@ -232,6 +249,23 @@ extension APIClient {
 
     public func uncompleteTask(id: String) async throws -> TaskDTO {
         try await post(TaskDTO.self, "/tasks/\(id)/uncomplete")
+    }
+
+    // Task categories
+    public func taskCategories() async throws -> TaskCategoryListResponse {
+        try await get(TaskCategoryListResponse.self, "/task-categories")
+    }
+
+    public func createTaskCategory(_ request: TaskCategoryCreateRequest) async throws -> TaskCategoryDTO {
+        try await post(TaskCategoryDTO.self, "/task-categories", body: request)
+    }
+
+    public func patchTaskCategory(id: String, _ patch: JSONObject) async throws -> TaskCategoryDTO {
+        try await self.patch(TaskCategoryDTO.self, "/task-categories/\(id)", body: patch)
+    }
+
+    public func deleteTaskCategory(id: String) async throws -> OkResponse {
+        try await delete(OkResponse.self, "/task-categories/\(id)")
     }
 
     // Recurrence templates

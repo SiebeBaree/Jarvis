@@ -28,6 +28,7 @@ export const PATCH = handler(
     if (patch.notes !== undefined) set.notes = patch.notes;
     if (patch.priority !== undefined) set.priority = patch.priority;
     if (patch.goalId !== undefined) set.goalId = patch.goalId;
+    if (patch.categoryId !== undefined) set.categoryId = patch.categoryId;
     if (patch.dueTime !== undefined) set.dueTime = patch.dueTime;
     if (patch.rule !== undefined) set.rule = patch.rule;
     if (patch.startDate !== undefined) set.startDate = patch.startDate;
@@ -45,6 +46,7 @@ export const PATCH = handler(
       patch.notes !== undefined ||
       patch.priority !== undefined ||
       patch.goalId !== undefined ||
+      patch.categoryId !== undefined ||
       patch.dueTime !== undefined ||
       patch.rule !== undefined ||
       patch.startDate !== undefined ||

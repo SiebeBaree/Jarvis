@@ -133,25 +133,33 @@ final class HabitsStore {
 
     // MARK: - Mutations
 
-    /// Optimistic: reps flip instantly, rollback on failure.
-    func logHabit(_ habitId: String) async {
-        await adjustReps(habitId, delta: 1) { try await $0.logHabit(id: habitId) }
+    /// Optimistic: reps flip instantly, rollback on failure. A `dayKey`
+    /// targets a past day from the 7-day backfill strip; nil = today.
+    func logHabit(_ habitId: String, dayKey: DayKey? = nil) async {
+        await adjustReps(habitId, dayKey: dayKey, delta: 1) { try await $0.logHabit(id: habitId, dayKey: dayKey) }
     }
 
-    func unlogHabit(_ habitId: String) async {
-        await adjustReps(habitId, delta: -1) { try await $0.unlogHabit(id: habitId) }
+    func unlogHabit(_ habitId: String, dayKey: DayKey? = nil) async {
+        await adjustReps(habitId, dayKey: dayKey, delta: -1) { try await $0.unlogHabit(id: habitId, dayKey: dayKey) }
     }
 
     private func adjustReps(
         _ habitId: String,
+        dayKey: DayKey?,
         delta: Int,
         _ operation: (APIClient) async throws -> some Sendable,
     ) async {
         guard let model else { return }
         let original = content
         if var loaded = content.value {
-            loaded.today.habits = loaded.today.habits.map {
-                $0.habit.id == habitId ? $0.adjustingReps(by: delta) : $0
+            let today = loaded.today.dayKey
+            let weekStart = HabitDisplay.weekStart(of: today)
+            loaded.today.habits = loaded.today.habits.map { entry in
+                guard entry.habit.id == habitId else { return entry }
+                if let dayKey, dayKey != today {
+                    return entry.adjustingReps(by: delta, on: dayKey, countsInWeek: dayKey >= weekStart)
+                }
+                return entry.adjustingReps(by: delta)
             }
             content = .loaded(loaded)
         }

@@ -137,17 +137,7 @@ struct ScoreBreakdownSheet: View {
     }
 
     private func ring(_ payload: DayPayload) -> some View {
-        let score = payload.score
-        let w = weights
-        return ScoreRing(
-            size: 160,
-            weights: w,
-            taskFill: score.taskPoints.map { $0 / max(w.tasks, 1) },
-            habitFill: score.habitPoints.map { $0 / max(w.habits, 1) },
-            feelFill: score.feelPoints.map { $0 / max(w.feel, 1) },
-            total: score.total,
-            caption: isToday ? "today" : "score",
-        )
+        ScoreRing(size: 160, total: payload.score.total, caption: isToday ? "today" : "score")
     }
 
     private var isToday: Bool {

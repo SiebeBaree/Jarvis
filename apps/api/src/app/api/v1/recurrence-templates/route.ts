@@ -30,6 +30,7 @@ export const POST = handler(async (request: Request) => {
       notes: body.notes ?? null,
       priority: body.priority ?? "medium",
       goalId: body.goalId ?? null,
+      categoryId: body.categoryId ?? null,
       dueTime: body.dueTime ?? null,
       rule: body.rule,
       startDate: body.startDate,
