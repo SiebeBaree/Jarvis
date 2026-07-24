@@ -1,7 +1,7 @@
 // Live chat-agent pipeline test (fast tier — cheap). Gated:
 //   ek run -- env RUN_AI=1 pnpm vitest run tests/integration/chat.e2e.test.ts
 // Covers: agent turn with a mutating tool → proposed_actions card → confirm
-// executes stored args → tool message appended; briefing generation + cache.
+// executes stored args → tool message appended; wrap-up generation + cache.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -116,11 +116,11 @@ describe.skipIf(!enabled)("chat agent → action card → confirm · live e2e", 
     void deltas; // streaming text is model-dependent; not asserted
   }, 240_000);
 
-  it("generates and caches the morning briefing", async () => {
-    const { getBriefing } = await import("../../src/lib/ai/briefing");
-    const first = await getBriefing(userId, settings, "morning");
+  it("generates and caches the evening wrap-up", async () => {
+    const { getWrapup } = await import("../../src/lib/ai/briefing");
+    const first = await getWrapup(userId, settings);
     expect(first.content.length).toBeGreaterThan(20);
-    const second = await getBriefing(userId, settings, "morning");
+    const second = await getWrapup(userId, settings);
     expect(second.content).toBe(first.content); // cache hit, no regeneration
   }, 120_000);
 });

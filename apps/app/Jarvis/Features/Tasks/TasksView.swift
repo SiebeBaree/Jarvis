@@ -15,14 +15,11 @@ struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var store = TasksStore()
     @State private var showingEditor = false
-    @State private var showingRecurring = false
-    @State private var showSearch = false
     @State private var showNewCategoryAlert = false
     @State private var newCategoryName = ""
     @State private var renameCategoryTarget: TaskCategoryDTO?
     @State private var renameCategoryName = ""
     @State private var deleteCategoryTarget: TaskCategoryDTO?
-    @FocusState private var searchFocused: Bool
     #if os(macOS)
     @State private var selectedTaskId: String?
     #else
@@ -34,9 +31,6 @@ struct TasksView: View {
             Group {
                 controlsRow
                 categoryChips
-                if showSearch {
-                    searchField
-                }
                 if let actionError = store.actionError {
                     inlineError(actionError)
                 }
@@ -67,21 +61,11 @@ struct TasksView: View {
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Menu {
-                    Button("Recurring tasks") { showingRecurring = true }
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
-                }
-            }
         }
         .sheet(isPresented: $showingEditor) {
             TaskEditorView(goals: store.goals, defaultDueDate: store.todayKey) {
                 await store.fetch()
             }
-        }
-        .navigationDestination(isPresented: $showingRecurring) {
-            RecurringTasksView()
         }
         #if os(macOS)
         .inspector(isPresented: inspectorShown) {
@@ -105,6 +89,11 @@ struct TasksView: View {
             async let categoriesTask: Void = store.fetchCategories()
             _ = await (goalsTask, categoriesTask)
             await store.fetch()
+        }
+        // Mutations anywhere (here, Today, the detail sheet) invalidate the
+        // cache and bump this; the list then revalidates in the background.
+        .onChange(of: model.todayRevision) {
+            Task { await store.fetch() }
         }
         .alert("New category", isPresented: $showNewCategoryAlert) {
             TextField("Name", text: $newCategoryName)
@@ -167,11 +156,8 @@ struct TasksView: View {
     // MARK: - Controls (first list row)
 
     private var controlsRow: some View {
-        HStack(spacing: Space.sm) {
-            ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
-            searchToggle
-        }
-        .padding(.top, Space.xs)
+        ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
+            .padding(.top, Space.xs)
     }
 
     // MARK: - Category pages (TickTick-style filter chips)
@@ -241,59 +227,6 @@ struct TasksView: View {
             .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Search (inline — the system .searchable forces heavy
-    // window-toolbar chrome on macOS, so search lives in the content instead)
-
-    private var searchToggle: some View {
-        Button {
-            if showSearch {
-                store.searchText = ""
-                showSearch = false
-            } else {
-                showSearch = true
-                searchFocused = true
-            }
-        } label: {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(showSearch ? Color.accentPrimary : Color.textSecondary)
-                .padding(.horizontal, Space.sm)
-                .padding(.vertical, 6)
-                .background(showSearch ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut("f", modifiers: .command)
-        .accessibilityLabel(showSearch ? "Close search" : "Search tasks")
-    }
-
-    private var searchField: some View {
-        HStack(spacing: Space.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
-                .foregroundStyle(Color.textTertiary)
-            TextField("Search tasks", text: Bindable(store).searchText)
-                .font(.subheadJ)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-            if !store.searchText.isEmpty {
-                Button {
-                    store.searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.textTertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, Space.md)
-        .padding(.vertical, 6)
-        .background(Color.bgSurface, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
     }
 
     // MARK: - List body

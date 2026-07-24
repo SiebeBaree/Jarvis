@@ -27,6 +27,26 @@ extension TaskDTO {
             subtasks: subtasks,
         )
     }
+
+    /// A copy moved to another due date (nil clears it).
+    public func with(dueDate newDueDate: DayKey?) -> TaskDTO {
+        TaskDTO(
+            id: id,
+            title: title,
+            notes: notes,
+            dueDate: newDueDate,
+            dueTime: dueTime,
+            priority: priority,
+            status: status,
+            completedAt: completedAt,
+            goalId: goalId,
+            categoryId: categoryId,
+            parentTaskId: parentTaskId,
+            templateId: templateId,
+            sortOrder: sortOrder,
+            subtasks: subtasks,
+        )
+    }
 }
 
 extension HabitTodayEntryDTO {

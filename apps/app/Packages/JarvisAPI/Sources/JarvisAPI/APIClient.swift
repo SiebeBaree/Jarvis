@@ -80,7 +80,45 @@ public actor APIClient {
         let error: Payload
     }
 
+    /// Transient failures worth retrying: the connection never produced a
+    /// usable answer. A cold Vercel lambda waking a suspended Neon compute is
+    /// the common case — without this the first request of a session fails and
+    /// the user has to tap Retry themselves.
+    private static func isTransient(_ error: APIClientError) -> Bool {
+        switch error {
+        case .network: true
+        case .api(_, _, let status): status >= 500 || status == 408 || status == 429
+        case .unauthorized, .decoding: false
+        }
+    }
+
+    /// Retries are only safe on reads — a replayed POST could double-create.
+    private static func attemptCount(for method: String) -> Int {
+        method == "GET" ? 3 : 1
+    }
+
     func send<T: Decodable & Sendable>(
+        _ type: T.Type,
+        method: String,
+        path: String,
+        query: [URLQueryItem] = [],
+        body: (some Encodable & Sendable)? = nil as EmptyBody?,
+    ) async throws -> T {
+        let maxAttempts = Self.attemptCount(for: method)
+        var attempt = 1
+        while true {
+            do {
+                return try await perform(type, method: method, path: path, query: query, body: body)
+            } catch let error as APIClientError where attempt < maxAttempts && Self.isTransient(error) {
+                // 400 ms, then 1.2 s — long enough for a warm-up, short enough
+                // that a genuinely dead server still fails quickly.
+                try? await Task.sleep(for: .milliseconds(400 * attempt * attempt))
+                attempt += 1
+            }
+        }
+    }
+
+    private func perform<T: Decodable & Sendable>(
         _ type: T.Type,
         method: String,
         path: String,

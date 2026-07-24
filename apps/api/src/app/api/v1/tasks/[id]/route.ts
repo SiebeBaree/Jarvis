@@ -10,6 +10,20 @@ import { taskPatchSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
+/** One task with its subtasks — the detail screen used to scan whole lists. */
+export const GET = handler(
+  async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
+    const ctx = await requireAuth(request);
+    const { id } = await params;
+    const task = await db.query.tasks.findFirst({
+      where: and(eq(tasks.id, id), eq(tasks.userId, ctx.userId)),
+    });
+    if (!task) throw new ApiError(404, "not_found", "Task not found");
+    const [withChildren] = await withSubtasks([task]);
+    return NextResponse.json(withChildren);
+  },
+);
+
 export const PATCH = handler(
   async (request: Request, { params }: { params: Promise<{ id: string }> }) => {
     const ctx = await requireAuth(request);

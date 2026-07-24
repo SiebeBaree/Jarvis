@@ -59,29 +59,45 @@ export async function getOrCreateSettings(userId: string): Promise<SettingsRow> 
   return created;
 }
 
-/** Validates the bearer token and loads the user's settings. Throws 401. */
+/**
+ * Validates the bearer token and loads the user's settings. Throws 401.
+ *
+ * Session + user + settings come back in ONE joined query: this runs before
+ * every single request, and over the Neon HTTP driver each extra `findFirst`
+ * is a full network round-trip added to the user's latency.
+ */
 export async function requireAuth(request: Request): Promise<AuthContext> {
   const header = request.headers.get("authorization");
   const rawToken = header?.startsWith("Bearer ") ? header.slice(7).trim() : null;
   if (!rawToken) throw new ApiError(401, "unauthorized", "Missing bearer token");
 
-  const session = await db.query.sessions.findFirst({
-    where: eq(sessions.tokenHash, hashToken(rawToken)),
-  });
-  if (!session || session.revokedAt) throw new ApiError(401, "unauthorized", "Invalid or revoked token");
+  const [row] = await db
+    .select({
+      sessionId: sessions.id,
+      revokedAt: sessions.revokedAt,
+      lastUsedAt: sessions.lastUsedAt,
+      userId: users.id,
+      email: users.email,
+      settings: settings,
+    })
+    .from(sessions)
+    .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(settings, eq(settings.userId, users.id))
+    .where(eq(sessions.tokenHash, hashToken(rawToken)))
+    .limit(1);
 
-  const user = await db.query.users.findFirst({ where: eq(users.id, session.userId) });
-  if (!user) throw new ApiError(401, "unauthorized", "User no longer exists");
+  if (!row || row.revokedAt) throw new ApiError(401, "unauthorized", "Invalid or revoked token");
 
   // Touch lastUsedAt at most ~hourly to keep reads cheap.
-  if (Date.now() - session.lastUsedAt.getTime() > 60 * 60 * 1000) {
-    await db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.id, session.id));
+  if (Date.now() - row.lastUsedAt.getTime() > 60 * 60 * 1000) {
+    await db.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.id, row.sessionId));
   }
 
   return {
-    userId: user.id,
-    email: user.email,
-    settings: await getOrCreateSettings(user.id),
+    userId: row.userId,
+    email: row.email,
+    // Only pre-settings accounts (or a mid-signup crash) miss the row.
+    settings: row.settings ?? (await getOrCreateSettings(row.userId)),
     rawToken,
   };
 }

@@ -7,9 +7,17 @@ import { db } from "@/db/client";
 import { blocks, habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
 import type { SettingsRow } from "./auth";
 import { reconcileBlockStatuses } from "./blocks";
-import { addDays, weekEnd, weekStart, weekIndexInBlock, type DayKey } from "./daykey";
+import {
+  addDays,
+  dayKeyFor,
+  isReviewWeek as isReviewWeekFn,
+  weekEnd,
+  weekStart,
+  weekIndexInBlock,
+  type DayKey,
+} from "./daykey";
 import { occurrencesToGenerate } from "./recurrence";
-import { paceStatus, type PaceStatus } from "./scoring/engine";
+import { paceStatus, type PaceStatus, type TaskForScoring } from "./scoring/engine";
 import {
   activeBlockFor,
   applicableHabits,
@@ -34,57 +42,83 @@ export async function materializeTemplates(
     where: and(eq(recurrenceTemplates.userId, userId), isNull(recurrenceTemplates.pausedAt)),
   });
 
+  // One insert and one update for the whole batch — this runs on the Today
+  // path, where every extra query is a round-trip the user waits on.
+  const rows: (typeof tasks.$inferInsert)[] = [];
+  const generatedIds: string[] = [];
+
   for (const template of templates) {
     if (template.lastGeneratedThrough && template.lastGeneratedThrough >= through) continue;
-    const occurrences = occurrencesToGenerate({
+    generatedIds.push(template.id);
+    for (const dayKey of occurrencesToGenerate({
       rule: template.rule,
       startDate: template.startDate,
       endDate: template.endDate,
       lastGeneratedThrough: template.lastGeneratedThrough,
       through,
-    });
-    if (occurrences.length > 0) {
-      await db
-        .insert(tasks)
-        .values(
-          occurrences.map((dayKey) => ({
-            userId,
-            title: template.title,
-            notes: template.notes,
-            priority: template.priority,
-            goalId: template.goalId,
-            categoryId: template.categoryId,
-            dueDate: dayKey,
-            dueTime: template.dueTime,
-            templateId: template.id,
-            templateDate: dayKey,
-          })),
-        )
-        .onConflictDoNothing();
+    })) {
+      rows.push({
+        userId,
+        title: template.title,
+        notes: template.notes,
+        priority: template.priority,
+        goalId: template.goalId,
+        categoryId: template.categoryId,
+        dueDate: dayKey,
+        dueTime: template.dueTime,
+        templateId: template.id,
+        templateDate: dayKey,
+      });
     }
-    await db
-      .update(recurrenceTemplates)
-      .set({ lastGeneratedThrough: through })
-      .where(eq(recurrenceTemplates.id, template.id));
   }
+
+  if (generatedIds.length === 0) return;
+  if (rows.length > 0) await db.insert(tasks).values(rows).onConflictDoNothing();
+  await db
+    .update(recurrenceTemplates)
+    .set({ lastGeneratedThrough: through })
+    .where(inArray(recurrenceTemplates.id, generatedIds));
 }
 
 export type TaskRow = typeof tasks.$inferSelect;
 export type TaskDTO = TaskRow & { subtasks: TaskRow[] };
 
-export async function withSubtasks(topLevel: TaskRow[]): Promise<TaskDTO[]> {
-  if (topLevel.length === 0) return [];
+/** Subtasks of every given parent, grouped by parent id — one query. */
+async function subtasksByParent(topLevel: TaskRow[]): Promise<Map<string, TaskRow[]>> {
+  const byParent = new Map<string, TaskRow[]>();
+  if (topLevel.length === 0) return byParent;
   const children = await db.query.tasks.findMany({
     where: inArray(tasks.parentTaskId, topLevel.map((t) => t.id)),
     orderBy: [asc(tasks.sortOrder), asc(tasks.createdAt)],
   });
-  const byParent = new Map<string, TaskRow[]>();
   for (const child of children) {
     const list = byParent.get(child.parentTaskId!) ?? [];
     list.push(child);
     byParent.set(child.parentTaskId!, list);
   }
+  return byParent;
+}
+
+export async function withSubtasks(topLevel: TaskRow[]): Promise<TaskDTO[]> {
+  const byParent = await subtasksByParent(topLevel);
   return topLevel.map((t) => ({ ...t, subtasks: byParent.get(t.id) ?? [] }));
+}
+
+/** Narrow a repCounts map to a sub-range without another query. */
+function sliceReps(
+  all: Map<string, Map<DayKey, number>>,
+  from: DayKey,
+  to: DayKey,
+): Map<string, Map<DayKey, number>> {
+  const out = new Map<string, Map<DayKey, number>>();
+  for (const [habitId, days] of all) {
+    const inner = new Map<DayKey, number>();
+    for (const [day, count] of days) {
+      if (day >= from && day <= to) inner.set(day, count);
+    }
+    if (inner.size > 0) out.set(habitId, inner);
+  }
+  return out;
 }
 
 export interface HabitTodayEntry {
@@ -130,31 +164,31 @@ export async function buildDayPayload(
   now = new Date(),
 ): Promise<DayPayload> {
   if (options.isToday) {
-    await materializeTemplates(userId, settings, now);
-    await reconcileBlockStatuses(userId, dayKey);
+    // Independent bookkeeping — no reason to pay for them one after another.
+    await Promise.all([
+      materializeTemplates(userId, settings, now),
+      reconcileBlockStatuses(userId, dayKey),
+    ]);
     await finalizeThrough(userId, settings, now);
   }
 
-  const snapshot = await recomputeDay(userId, settings, dayKey, now);
+  // The block decides review-week behaviour, so it has to land before the
+  // rest. Everything after it goes out in a single parallel batch, and the
+  // score is computed from those same rows instead of re-reading them.
   const block = await activeBlockFor(userId, dayKey);
-  const upcoming = block
-    ? null
-    : await db.query.blocks.findFirst({
-        where: and(
-          eq(blocks.userId, userId),
-          gt(blocks.startDate, dayKey),
-          ne(blocks.status, "completed"),
-        ),
-        orderBy: [asc(blocks.startDate)],
-      });
+  const isReviewWeek = block ? isReviewWeekFn(dayKey, block.startDate, block.endDate) : false;
 
-  const [dueTop, overdueTop, dayHabits, reps, recentReps, mood, yesterdayMood] = await Promise.all([
+  // One rep query covering both windows (score week + trailing 7 days).
+  const repsFrom = weekStart(dayKey) < addDays(dayKey, -6) ? weekStart(dayKey) : addDays(dayKey, -6);
+  const repsTo = weekEnd(dayKey) > dayKey ? weekEnd(dayKey) : dayKey;
+
+  const [dueTop, overdueTop, dayHabits, allReps, mood, yesterdayMood, upcoming] = await Promise.all([
     db.query.tasks.findMany({
       where: and(eq(tasks.userId, userId), eq(tasks.dueDate, dayKey), isNull(tasks.parentTaskId)),
       orderBy: [asc(tasks.sortOrder), asc(tasks.createdAt)],
     }),
     // Review week pauses tasks: no overdue nagging during week 13.
-    !snapshot.isReviewWeek
+    !isReviewWeek
       ? db.query.tasks.findMany({
           where: and(
             eq(tasks.userId, userId),
@@ -167,8 +201,7 @@ export async function buildDayPayload(
         })
       : Promise.resolve([]),
     applicableHabits(userId, dayKey, settings),
-    repCounts(userId, weekStart(dayKey), weekEnd(dayKey)),
-    repCounts(userId, addDays(dayKey, -6), dayKey),
+    repCounts(userId, repsFrom, repsTo),
     db.query.moodEntries.findFirst({
       where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, dayKey)),
     }),
@@ -177,12 +210,48 @@ export async function buildDayPayload(
           where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, addDays(dayKey, -1))),
         })
       : Promise.resolve(undefined),
+    block
+      ? Promise.resolve(undefined)
+      : db.query.blocks.findFirst({
+          where: and(
+            eq(blocks.userId, userId),
+            gt(blocks.startDate, dayKey),
+            ne(blocks.status, "completed"),
+          ),
+          orderBy: [asc(blocks.startDate)],
+        }),
   ]);
+
+  const reps = sliceReps(allReps, weekStart(dayKey), weekEnd(dayKey));
+  const recentReps = sliceReps(allReps, addDays(dayKey, -6), dayKey);
+
+  // Subtasks for the due AND overdue lists in one query; the score reuses them.
+  const childrenByParent = await subtasksByParent([...dueTop, ...overdueTop]);
+  const attach = (rows: TaskRow[]): TaskDTO[] =>
+    rows.map((t) => ({ ...t, subtasks: childrenByParent.get(t.id) ?? [] }));
+
+  const dueForScoring: TaskForScoring[] = dueTop.map((t) => ({
+    id: t.id,
+    status: t.status,
+    subtasks: (childrenByParent.get(t.id) ?? []).map((s) => ({ status: s.status })),
+    completedDayKey: t.completedAt
+      ? dayKeyFor(t.completedAt, settings.timezone, settings.dayBoundaryHour)
+      : null,
+    dueDate: dayKey,
+  }));
+
+  const snapshot = await recomputeDay(userId, settings, dayKey, now, {
+    block,
+    dayHabits,
+    reps,
+    mood,
+    dueTasks: dueForScoring,
+  });
 
   // Week 13 hides due tasks except templates that opted into "Scheduled anyway".
   let visibleDue = dueTop;
   let pausedTaskCount = 0;
-  if (snapshot.isReviewWeek) {
+  if (isReviewWeek) {
     const templateIds = [
       ...new Set(dueTop.map((t) => t.templateId).filter((id): id is string => id !== null)),
     ];
@@ -248,7 +317,7 @@ export async function buildDayPayload(
   return {
     dayKey,
     weekNumber: block ? weekIndexInBlock(dayKey, block.startDate) : null,
-    isReviewWeek: snapshot.isReviewWeek,
+    isReviewWeek,
     block: block
       ? {
           id: block.id,
@@ -268,8 +337,8 @@ export async function buildDayPayload(
         }
       : null,
     score: snapshot,
-    tasksDue: await withSubtasks(visibleDue),
-    overdueTasks: await withSubtasks(overdueTop),
+    tasksDue: attach(visibleDue),
+    overdueTasks: attach(overdueTop),
     habits: habitEntries,
     mood: mood ? { value: mood.value, note: mood.note } : null,
     yesterdayMoodMissing: options.isToday && !yesterdayMood,

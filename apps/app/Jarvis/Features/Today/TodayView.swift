@@ -140,23 +140,21 @@ struct TodayView: View {
                         planSetupBanner
                     }
                 }
-                BriefingSlot(payload: payload) // Stage 3: morning briefing card
                 scoreHeader(payload)
                 moodSection(payload)
                 CheckinPromptCard() // weekly improvement-area photo prompt
                 WeeklyReviewSlot(payload: payload) // Stage 4: weekly review banner
                 WrapupSlot(payload: payload) // Stage 3: evening wrap-up banner
-                if !payload.overdueTasks.isEmpty {
-                    overdueSection(payload)
-                }
+                // Every task/habit ForEach below sits at a FIXED position in
+                // this builder (empty collections render nothing) — wrapping
+                // one in an `if` makes List fall back to structural row
+                // identity, and completing a row then animates its neighbour
+                // out instead of the row itself.
+                overdueSection(payload)
                 if payload.isReviewWeek {
                     reviewWeekTasksNote(payload)
-                    if !payload.tasksDue.isEmpty {
-                        tasksSection(payload)
-                    }
-                } else {
-                    tasksSection(payload)
                 }
+                tasksSection(payload)
                 habitsSection(payload)
             }
             .listRowSeparator(.hidden)
@@ -385,11 +383,13 @@ struct TodayView: View {
 
     @ViewBuilder
     private func overdueSection(_ payload: DayPayload) -> some View {
-        Text("OVERDUE")
-            .font(.captionJ)
-            .tracking(0.6)
-            .foregroundStyle(Color.warning)
-            .padding(.top, Space.sm)
+        if !payload.overdueTasks.isEmpty {
+            Text("OVERDUE")
+                .font(.captionJ)
+                .tracking(0.6)
+                .foregroundStyle(Color.warning)
+                .padding(.top, Space.sm)
+        }
 
         ForEach(payload.overdueTasks) { task in
             TaskRow(
@@ -443,17 +443,21 @@ struct TodayView: View {
     private func tasksSection(_ payload: DayPayload) -> some View {
         let open = sortedOpenTasks(payload)
         let completed = payload.tasksDue.filter { $0.status == .done }
+        // Review week pauses tasks entirely unless something is scheduled anyway.
+        let hidden = payload.isReviewWeek && payload.tasksDue.isEmpty
 
-        SectionHeader(payload.isReviewWeek ? "Scheduled anyway" : "Tasks")
-            .padding(.top, Space.sm)
+        if !hidden {
+            SectionHeader(payload.isReviewWeek ? "Scheduled anyway" : "Tasks")
+                .padding(.top, Space.sm)
 
-        if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
-            if payload.habits.isEmpty {
-                heroEmptyState
-            } else {
-                Text("Nothing scheduled today")
-                    .font(.bodyJ)
-                    .foregroundStyle(Color.textTertiary)
+            if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
+                if payload.habits.isEmpty {
+                    heroEmptyState
+                } else {
+                    Text("Nothing scheduled today")
+                        .font(.bodyJ)
+                        .foregroundStyle(Color.textTertiary)
+                }
             }
         }
 
@@ -489,16 +493,14 @@ struct TodayView: View {
                 }
             }
             .buttonStyle(.plain)
+        }
 
-            if showCompleted {
-                ForEach(completed) { task in
-                    TaskRow(
-                        task: task,
-                        onToggle: { Task { await store.uncompleteTask(task) } },
-                        onTap: {},
-                    )
-                }
-            }
+        ForEach(showCompleted ? completed : []) { task in
+            TaskRow(
+                task: task,
+                onToggle: { Task { await store.uncompleteTask(task) } },
+                onTap: {},
+            )
         }
     }
 
@@ -675,37 +677,35 @@ struct TodayView: View {
         SectionHeader("Habits")
             .padding(.top, Space.sm)
 
-        if payload.habits.isEmpty {
-            if !payload.tasksDue.isEmpty || !payload.overdueTasks.isEmpty {
-                HStack(spacing: Space.sm) {
-                    Text("No habits yet — create them in the Habits tab")
-                        .font(.bodyJ)
-                        .foregroundStyle(Color.textTertiary)
-                    Button("Open Habits") {
-                        model.requestedSection = .habits
-                    }
-                    .buttonStyle(.jarvisGhost)
-                }
-            }
-        } else {
-            let alsoAvailable = payload.habits.filter { isAlsoAvailable($0) }
-            let active = payload.habits.filter { !isAlsoAvailable($0) }
+        let alsoAvailable = payload.habits.filter { isAlsoAvailable($0) }
+        let active = payload.habits.filter { !isAlsoAvailable($0) }
 
-            ForEach(active) { entry in
-                habitRow(entry, payload: payload, subdued: false)
-            }
-
-            if !alsoAvailable.isEmpty {
-                Text("ALSO AVAILABLE")
-                    .font(.captionJ)
-                    .tracking(0.6)
+        if payload.habits.isEmpty, !payload.tasksDue.isEmpty || !payload.overdueTasks.isEmpty {
+            HStack(spacing: Space.sm) {
+                Text("No habits yet — create them in the Habits tab")
+                    .font(.bodyJ)
                     .foregroundStyle(Color.textTertiary)
-                    .padding(.top, Space.xs)
-
-                ForEach(alsoAvailable) { entry in
-                    habitRow(entry, payload: payload, subdued: true)
+                Button("Open Habits") {
+                    model.requestedSection = .habits
                 }
+                .buttonStyle(.jarvisGhost)
             }
+        }
+
+        ForEach(active) { entry in
+            habitRow(entry, payload: payload, subdued: false)
+        }
+
+        if !alsoAvailable.isEmpty {
+            Text("ALSO AVAILABLE")
+                .font(.captionJ)
+                .tracking(0.6)
+                .foregroundStyle(Color.textTertiary)
+                .padding(.top, Space.xs)
+        }
+
+        ForEach(alsoAvailable) { entry in
+            habitRow(entry, payload: payload, subdued: true)
         }
     }
 
@@ -816,8 +816,9 @@ struct TodayView: View {
 
 // MARK: - Mood card
 
-/// "How do you feel today?" gradient slider (0–100). Unset = hollow knob,
-/// "—" value chip, faint accent card tint. Commits on drag end.
+/// "How do you feel?" — compact gradient slider (0–100). One caption line
+/// with a live word label, then a slim track. Unset = hollow knob, "—" for
+/// the value, faint accent card tint. Commits on release (a tap counts).
 private struct MoodCard: View {
     let mood: MoodDTO?
     let onCommit: (Int) -> Void
@@ -827,23 +828,37 @@ private struct MoodCard: View {
 
     private var isSet: Bool { mood != nil || isDragging }
 
+    /// Word for the current position — more readable at a glance than "72".
+    private var label: String {
+        switch value {
+        case ..<20: "Rough"
+        case ..<40: "Low"
+        case ..<60: "Okay"
+        case ..<80: "Good"
+        default: "Great"
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
-            HStack {
-                Text("How do you feel today?")
-                    .font(.headlineJ)
-                    .foregroundStyle(Color.textPrimary)
-                Spacer()
+        VStack(alignment: .leading, spacing: Space.sm) {
+            HStack(spacing: Space.sm) {
+                Text("How do you feel?")
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textSecondary)
+                Spacer(minLength: Space.sm)
+                Text(isSet ? label : "Not set")
+                    .font(.subheadJ)
+                    .foregroundStyle(isSet ? Color.textPrimary : Color.textTertiary)
                 Text(isSet ? "\(Int(value.rounded()))" : "—")
                     .font(.monoJ)
-                    .foregroundStyle(isSet ? Color.textPrimary : Color.textTertiary)
-                    .padding(.horizontal, Space.sm)
-                    .padding(.vertical, 3)
-                    .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
+                    .foregroundStyle(isSet ? Color.textSecondary : Color.textTertiary)
+                    .frame(minWidth: 22, alignment: .trailing)
+                    .monospacedDigit()
             }
             MoodSlider(value: $value, isSet: isSet, isDragging: $isDragging, onCommit: onCommit)
         }
-        .padding(Space.lg)
+        .padding(.horizontal, Space.lg)
+        .padding(.vertical, Space.md)
         .background(
             mood == nil ? Color.accentSubtle.opacity(0.45) : Color.bgSurface,
             in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous),
@@ -893,8 +908,8 @@ struct MoodSlider: View {
     @Binding var isDragging: Bool
     let onCommit: (Int) -> Void
 
-    private let knobSize: CGFloat = 22
-    private let trackHeight: CGFloat = 6
+    private let knobSize: CGFloat = 16
+    private let trackHeight: CGFloat = 4
 
     var body: some View {
         GeometryReader { proxy in
@@ -905,10 +920,12 @@ struct MoodSlider: View {
                 Capsule()
                     .fill(LinearGradient.moodGradient)
                     .frame(height: trackHeight)
-                    .opacity(isSet ? 1 : 0.35)
+                    .opacity(isSet ? 1 : 0.3)
                     .padding(.horizontal, knobSize / 2)
 
                 knob
+                    .scaleEffect(isDragging ? 1.25 : 1)
+                    .animation(.spring(duration: 0.2), value: isDragging)
                     .offset(x: knobX)
             }
             .frame(maxHeight: .infinity)
@@ -926,24 +943,17 @@ struct MoodSlider: View {
                     },
             )
         }
-        .frame(height: 28)
+        .frame(height: 20)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Mood")
         .accessibilityValue(isSet ? "\(Int(value.rounded()))" : "Not set")
     }
 
-    @ViewBuilder
     private var knob: some View {
-        if isSet {
-            Circle()
-                .fill(Color.bgSurface)
-                .overlay(Circle().strokeBorder(Color.borderStrong, lineWidth: 1))
-                .frame(width: knobSize, height: knobSize)
-        } else {
-            Circle()
-                .strokeBorder(Color.borderStrong, lineWidth: 1.5)
-                .background(Circle().fill(Color.bgCanvas))
-                .frame(width: knobSize, height: knobSize)
-        }
+        Circle()
+            .fill(isSet ? Color.bgSurface : Color.bgCanvas)
+            .overlay(Circle().strokeBorder(Color.borderStrong, lineWidth: isSet ? 1 : 1.5))
+            .shadow(color: .black.opacity(isSet ? 0.12 : 0), radius: 1.5, y: 0.5)
+            .frame(width: knobSize, height: knobSize)
     }
 }

@@ -37,9 +37,22 @@ final class AppModel {
         self.api = APIClient(baseURL: Config.apiBaseURL)
     }
 
+    /// Trailing-edge debounce for the post-mutation refetch. Ticking four
+    /// habits used to fire four full `/days/today` round-trips; the optimistic
+    /// UI is already correct, so one revalidation after the burst is enough.
+    private var revalidation: Task<Void, Never>?
+    private static let revalidateDelay = Duration.milliseconds(700)
+
+    /// Drops cached reads immediately (so any screen opened next is fresh) and
+    /// schedules one refetch for the screens already on display.
     func invalidateToday() {
         cache.removeAll()
-        todayRevision += 1
+        revalidation?.cancel()
+        revalidation = Task { [weak self] in
+            try? await Task.sleep(for: Self.revalidateDelay)
+            guard !Task.isCancelled else { return }
+            self?.todayRevision += 1
+        }
     }
 
     func updatePlanContext(weekNumber: Int?, isReviewWeek: Bool) {
@@ -84,7 +97,9 @@ final class AppModel {
         _ = try? await api.logout()
         Keychain.deleteToken()
         await api.setToken(nil)
+        revalidation?.cancel()
         cache.removeAll()
+        DiskCache.removeAll()
         session = .loggedOut
     }
 

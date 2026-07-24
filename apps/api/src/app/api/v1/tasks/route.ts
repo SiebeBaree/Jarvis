@@ -9,6 +9,7 @@ import { materializeTemplates, withSubtasks } from "@/lib/today";
 import { taskCreateSchema, taskListQuerySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+export const maxDuration = 30; // cold start + Neon wake must not be cut short
 
 export const GET = handler(async (request: Request) => {
   const ctx = await requireAuth(request);

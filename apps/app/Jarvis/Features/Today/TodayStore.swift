@@ -12,6 +12,8 @@ import Observation
 @MainActor
 final class TodayStore {
     private static let cacheKey = "days/today"
+    /// Same payload on disk; the memory key has a "/" and can't be a filename.
+    private static let diskKey = "day-today"
 
     private(set) var day: LoadState<DayPayload> = .idle
     /// Inline error from a failed mutation (data on screen stays valid).
@@ -20,6 +22,10 @@ final class TodayStore {
     var backfillSkipped = false
 
     private var model: AppModel?
+    /// The fetch currently in flight — launch fires `.task` and the
+    /// scenePhase-active change back to back, and every extra caller here
+    /// used to mean another full payload request.
+    private var inFlight: Task<Void, Never>?
 
     var payload: DayPayload? { day.value }
 
@@ -28,17 +34,40 @@ final class TodayStore {
     }
 
     func load(force: Bool = false) async {
+        if let inFlight {
+            await inFlight.value
+            return
+        }
+        let task = Task { await fetch(force: force) }
+        inFlight = task
+        await task.value
+        inFlight = nil
+    }
+
+    private func fetch(force: Bool) async {
         guard let model else { return }
         if !force, day.value == nil, let cached: DayPayload = model.cache.get(Self.cacheKey) {
             day = .loaded(cached)
             model.updatePlanContext(weekNumber: cached.weekNumber, isReviewWeek: cached.isReviewWeek)
             return
         }
-        if day.value == nil { day = .loading }
+        // Cold launch: paint last session's payload right away, then refresh
+        // behind it. Only today's — an older one would show the wrong day.
+        if day.value == nil {
+            let boundary = model.settings?.dayBoundaryHour ?? 3
+            if let stored = DiskCache.load(DayPayload.self, Self.diskKey),
+               stored.dayKey == DayKeyMath.todayKey(boundaryHour: boundary) {
+                day = .loaded(stored)
+                model.updatePlanContext(weekNumber: stored.weekNumber, isReviewWeek: stored.isReviewWeek)
+            } else {
+                day = .loading
+            }
+        }
         do {
             let payload = try await model.api.today()
             day = .loaded(payload)
             model.cache.set(Self.cacheKey, payload)
+            DiskCache.save(payload, Self.diskKey)
             model.updatePlanContext(weekNumber: payload.weekNumber, isReviewWeek: payload.isReviewWeek)
         } catch {
             model.handle(error)

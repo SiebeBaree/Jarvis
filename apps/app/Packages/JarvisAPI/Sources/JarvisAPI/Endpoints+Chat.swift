@@ -90,11 +90,7 @@ extension APIClient {
         try await post(ActionResponse.self, "/ai/actions/\(id)/reject")
     }
 
-    // Briefings
-    public func briefingToday() async throws -> BriefingDTO {
-        try await get(BriefingDTO.self, "/ai/briefing/today")
-    }
-
+    // Evening wrap-up (the morning briefing was removed — see docs/deviations.md)
     public func wrapupToday() async throws -> BriefingDTO {
         try await get(BriefingDTO.self, "/ai/wrapup/today")
     }

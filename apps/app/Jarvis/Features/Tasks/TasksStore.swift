@@ -39,7 +39,6 @@ final class TasksStore {
         }
     }
 
-    var searchText = ""
     /// Category filter (TickTick-style pages); nil = all categories.
     var selectedCategoryId: String?
     /// Inline error from a mutation (fetch errors live in `state`).
@@ -82,7 +81,22 @@ final class TasksStore {
         var noDate: [TaskDTO]
     }
 
+    /// Coalesces callers: `.task`, the segment `didSet`, and the revision
+    /// listener can all land together, and each one used to be its own fetch.
+    private var inFlight: Task<Void, Never>?
+
     func fetch(force: Bool = false) async {
+        if let inFlight {
+            await inFlight.value
+            return
+        }
+        let task = Task { await performFetch(force: force) }
+        inFlight = task
+        await task.value
+        inFlight = nil
+    }
+
+    private func performFetch(force: Bool) async {
         guard let model else { return }
         let cacheKey = "tasks:\(segment.rawValue)"
         if !force, let cached: SegmentData = model.cache.get(cacheKey) {
@@ -196,18 +210,15 @@ final class TasksStore {
         }
     }
 
-    /// Refetch a single task by scanning the list views (the API has no
-    /// GET /tasks/:id). Checks "all" first, then "done".
+    /// Refetch a single task. This used to pull the whole "all" list (and
+    /// then "done") to find one row — the detail screen did it on every open.
     @discardableResult
     func refreshTask(id: String) async -> TaskDTO? {
         guard let model else { return nil }
         do {
-            let all = try await model.api.tasks(view: "all")
-            remember(all.tasks)
-            if let found = all.tasks.first(where: { $0.id == id }) { return found }
-            let done = try await model.api.tasks(view: "done")
-            remember(done.tasks)
-            return done.tasks.first { $0.id == id }
+            let task = try await model.api.task(id: id)
+            remember([task])
+            return task
         } catch {
             model.handle(error)
             return nil
@@ -222,9 +233,8 @@ final class TasksStore {
 
     // MARK: - Derived groups
 
-    private func matchesSearch(_ task: TaskDTO) -> Bool {
-        let inCategory = selectedCategoryId == nil || task.categoryId == selectedCategoryId
-        return inCategory && (searchText.isEmpty || task.title.localizedCaseInsensitiveContains(searchText))
+    private func matchesFilter(_ task: TaskDTO) -> Bool {
+        selectedCategoryId == nil || task.categoryId == selectedCategoryId
     }
 
     private func priorityRank(_ priority: TaskPriority) -> Int {
@@ -246,7 +256,7 @@ final class TasksStore {
         guard let tasks = state.value else { return [] }
         let today = todayKey
         return tasks
-            .filter { $0.status == .open && ($0.dueDate ?? today) < today && matchesSearch($0) }
+            .filter { $0.status == .open && ($0.dueDate ?? today) < today && matchesFilter($0) }
             .sorted { ($0.dueDate ?? "") != ($1.dueDate ?? "") ? ($0.dueDate ?? "") < ($1.dueDate ?? "") : taskSort($0, $1) }
     }
 
@@ -254,7 +264,7 @@ final class TasksStore {
     var todayTasks: [TaskDTO] {
         guard let tasks = state.value else { return [] }
         let today = todayKey
-        let due = tasks.filter { $0.status != .cancelled && $0.dueDate == today && matchesSearch($0) }
+        let due = tasks.filter { $0.status != .cancelled && $0.dueDate == today && matchesFilter($0) }
         let open = due.filter { $0.status == .open }.sorted(by: taskSort)
         let done = due.filter { $0.status == .done }.sorted(by: taskSort)
         return open + done
@@ -265,7 +275,7 @@ final class TasksStore {
     var upcomingGroups: [TaskGroup] {
         guard let tasks = state.value else { return [] }
         let today = todayKey
-        let open = tasks.filter { $0.status == .open && matchesSearch($0) }
+        let open = tasks.filter { $0.status == .open && matchesFilter($0) }
         var groups: [TaskGroup] = []
         for offset in 1...7 {
             let key = DayKeyMath.addDays(today, offset)
@@ -281,7 +291,7 @@ final class TasksStore {
         if !later.isEmpty {
             groups.append(TaskGroup(id: "later", title: "Later", tasks: later))
         }
-        let noDate = noDateTasks.filter { matchesSearch($0) }.sorted(by: taskSort)
+        let noDate = noDateTasks.filter { matchesFilter($0) }.sorted(by: taskSort)
         if !noDate.isEmpty {
             groups.append(TaskGroup(id: "no-date", title: "No date", tasks: noDate))
         }
@@ -292,7 +302,7 @@ final class TasksStore {
     var allTasks: [TaskDTO] {
         guard let tasks = state.value else { return [] }
         return tasks
-            .filter { $0.status != .cancelled && matchesSearch($0) }
+            .filter { $0.status != .cancelled && matchesFilter($0) }
             .sorted { a, b in
                 switch (a.dueDate, b.dueDate) {
                 case let (.some(l), .some(r)) where l != r: l < r
@@ -307,7 +317,7 @@ final class TasksStore {
     var doneTasks: [TaskDTO] {
         guard let tasks = state.value else { return [] }
         return tasks
-            .filter { $0.status == .done && matchesSearch($0) }
+            .filter { $0.status == .done && matchesFilter($0) }
             .sorted { ($0.completedAt ?? "") > ($1.completedAt ?? "") }
     }
 
@@ -328,10 +338,12 @@ final class TasksStore {
             let updated = newStatus == .done
                 ? try await model.api.completeTask(id: task.id)
                 : try await model.api.uncompleteTask(id: task.id)
-            cache[updated.id] = updated
+            // The optimistic row already matches the server, so no blocking
+            // refetch here — invalidateToday() schedules one revalidation for
+            // whatever is on screen and drops the cached reads.
+            apply(updated)
             actionError = nil
             model.invalidateToday()
-            await fetch(force: true)
         } catch {
             model.handle(error)
             state = originalState
@@ -340,16 +352,24 @@ final class TasksStore {
         }
     }
 
+    /// Optimistic: the row moves to its new day immediately.
     func reschedule(_ task: TaskDTO, to dayKey: String) async {
         guard let model else { return }
+        let originalState = state
+        let optimistic = task.with(dueDate: dayKey)
+        if let tasks = state.value {
+            state = .loaded(tasks.map { $0.id == task.id ? optimistic : $0 })
+        }
+        cache[task.id] = optimistic
         do {
             let updated = try await model.api.patchTask(id: task.id, ["dueDate": .string(dayKey)])
-            cache[updated.id] = updated
+            apply(updated)
             actionError = nil
             model.invalidateToday()
-            await fetch(force: true)
         } catch {
             model.handle(error)
+            state = originalState
+            cache[task.id] = task
             actionError = error.localizedDescription
         }
     }
@@ -365,11 +385,19 @@ final class TasksStore {
             cache[task.id] = nil
             actionError = nil
             model.invalidateToday()
-            await fetch(force: true)
         } catch {
             model.handle(error)
             state = originalState
             actionError = error.localizedDescription
+        }
+    }
+
+    /// Replaces a task in the loaded list and the detail cache with the
+    /// server's version of it.
+    private func apply(_ task: TaskDTO) {
+        cache[task.id] = task
+        if let tasks = state.value {
+            state = .loaded(tasks.map { $0.id == task.id ? task : $0 })
         }
     }
 }

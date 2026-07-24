@@ -231,6 +231,10 @@ extension APIClient {
         return try await get(TaskListResponse.self, "/tasks", query: query)
     }
 
+    public func task(id: String) async throws -> TaskDTO {
+        try await get(TaskDTO.self, "/tasks/\(id)")
+    }
+
     public func createTask(_ request: TaskCreateRequest) async throws -> TaskDTO {
         try await post(TaskDTO.self, "/tasks", body: request)
     }

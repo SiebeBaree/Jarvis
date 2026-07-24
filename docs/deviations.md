@@ -93,3 +93,46 @@ improvement areas never asked about). Decisions confirmed with the user:
   o'clock filling total%, because the three weight-proportional arcs made a
   partial day read as disconnected green fragments. The per-component
   detail lives in the bars next to the ring and in the breakdown sheet.
+
+## 2026-07-24 — morning briefing removed, latency work, Tasks tab trimmed
+
+- **Morning briefing deleted** (spec §B3 Today item 2): the card fired an LLM
+  call (`GET /ai/briefing/today`) on every Today load, and that call itself
+  rebuilt the whole day payload — it dominated the screen's latency for a
+  card that wasn't being read. View, endpoint, client method and route are
+  gone; `lib/ai/briefing.ts` now only serves the evening wrap-up
+  (`getBriefing(kind)` → `getWrapup`). The `briefings` table keeps its
+  `morning` enum value so old rows still decode.
+- **Request latency.** Over the Neon HTTP driver every query is a round-trip,
+  so the work was removing round-trips from the serial path:
+  - `requireAuth` loads session + user + settings in ONE joined query
+    (was three sequential `findFirst`s, on *every* request).
+  - `buildDayPayload` no longer re-reads what it already has: the block,
+    habits, reps and mood it fetches are handed to `recomputeDay` via its new
+    optional `prefetched` argument (they used to be queried twice), the two
+    `withSubtasks` calls collapsed into one query covering due + overdue, the
+    two `repCounts` windows became one query sliced in memory, and the
+    upcoming-block lookup joined the parallel batch.
+  - `materializeTemplates` batches its inserts/updates instead of looping
+    with awaits per template.
+  - `GET /tasks/:id` added — the task detail screen used to fetch the entire
+    "all" list (then "done") to find one row.
+  - `maxDuration = 30` on `/days/today` and `/tasks` so a cold lambda waking
+    a suspended Neon compute isn't cut off mid-request.
+- **Client.** GETs retry transient failures (network error, 5xx, 408, 429)
+  twice with backoff — that is what the "failed to fetch, tap Retry" on first
+  launch was. Today's payload is also cached on disk and painted immediately
+  on a cold launch (same dayKey only) while the refresh runs behind it.
+  Post-mutation revalidation is debounced (700 ms) instead of one full
+  `/days/today` per tap, Tasks reschedule/delete became optimistic, and the
+  stores coalesce concurrent fetches.
+- **Today list identity.** Every task/habit `ForEach` now sits at a fixed
+  position in the List's ViewBuilder (empty collections render nothing)
+  instead of inside `if` blocks. Wrapping one in a conditional made SwiftUI
+  fall back to structural row identity, so completing an overdue task
+  animated the row *below* it out instead.
+- **Mood card compacted**: one caption line ("How do you feel?" + word label
+  + value) over a 4pt track, ~30% shorter than the old headline-sized card.
+- **Tasks tab**: inline search and the ⋯ → "Recurring tasks" toolbar menu
+  removed. Recurring templates stay reachable from a generated task's detail
+  screen.

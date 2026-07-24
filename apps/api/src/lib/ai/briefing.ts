@@ -1,7 +1,9 @@
-// Morning briefing + evening wrap-up: fast-tier, generated lazily on request,
-// cached per (dayKey, kind). Wrap-ups regenerate when the day materially
-// changed (fingerprint of open items + score). No cron — opening the app is
-// the trigger; Vercel Cron can pre-warm later without schema changes.
+// Evening wrap-up: fast-tier, generated lazily on request and cached per
+// dayKey. Regenerates when the day materially changed (fingerprint of open
+// items + score). No cron — opening the app is the trigger.
+//
+// The morning briefing was removed (docs/deviations.md): it fired an LLM call
+// on every Today load, which dominated the screen's latency.
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -25,29 +27,18 @@ function wrapupFingerprint(payload: DayPayload): string {
   return `${openTasks}:${habitsDone}:${payload.mood?.value ?? "x"}:${Math.round(payload.score.total ?? -1)}`;
 }
 
-const MORNING_INSTRUCTIONS = `You are J.A.R.V.I.S. writing the user's morning briefing. Calm, dry, precise — no exclamation marks, no hype. The user is autistic; be literal and concrete. Output 3 short parts in markdown:
-1. Two-3 sentences: what today looks like (tasks, habit targets, where the week stands).
-2. One line on the most leveraged thing to do first, and why.
-3. One dry, grounded motivational line tied to their goals — calm confidence, never cheerleading.
-Maximum ~110 words total. No headings, no lists, no emoji.`;
-
 const WRAPUP_INSTRUCTIONS = `You are J.A.R.V.I.S. writing a one-sentence evening wrap-up. Calm and literal, no exclamation marks. State where the day stands and, if anything meaningful is still open, name the single most worthwhile remaining item ("Strong day — 2 tasks left if you want the sweep."). One sentence only.`;
 
-export async function getBriefing(
-  userId: string,
-  settings: SettingsRow,
-  kind: "morning" | "wrapup",
-): Promise<BriefingRow> {
+export async function getWrapup(userId: string, settings: SettingsRow): Promise<BriefingRow> {
+  const kind = "wrapup" as const;
   const dayKey = todayKey(settings);
   const payload = await buildDayPayload(userId, settings, dayKey, { isToday: false });
-  const fingerprint = kind === "wrapup" ? wrapupFingerprint(payload) : null;
+  const fingerprint = wrapupFingerprint(payload);
 
   const existing = await db.query.briefings.findFirst({
     where: and(eq(briefings.userId, userId), eq(briefings.dayKey, dayKey), eq(briefings.kind, kind)),
   });
-  if (existing && (kind === "morning" || existing.fingerprint === fingerprint)) {
-    return existing;
-  }
+  if (existing && existing.fingerprint === fingerprint) return existing;
 
   const yesterday = await db.query.dailyScores.findFirst({
     where: and(eq(dailyScores.userId, userId), eq(dailyScores.dayKey, addDays(dayKey, -1))),
@@ -76,7 +67,7 @@ export async function getBriefing(
 
   const call = await callModel({
     task: "briefing",
-    instructions: kind === "morning" ? MORNING_INSTRUCTIONS : WRAPUP_INSTRUCTIONS,
+    instructions: WRAPUP_INSTRUCTIONS,
     input,
     maxOutputTokens: 2000,
   });

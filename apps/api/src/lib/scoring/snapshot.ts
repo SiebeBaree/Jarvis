@@ -149,6 +149,21 @@ export interface DaySnapshot {
 }
 
 /**
+ * Everything `recomputeDay` reads. Callers that already hold these rows (the
+ * Today payload does) pass them in so the score costs zero extra queries —
+ * otherwise it re-reads the block, habits, reps and mood a second time.
+ */
+export interface DayScoringInputs {
+  block: Awaited<ReturnType<typeof activeBlockFor>>;
+  dayHabits: HabitRow[];
+  /** repCounts over [weekStart(dayKey), weekEnd(dayKey)]. */
+  reps: Map<string, Map<DayKey, number>>;
+  mood: { value: number } | undefined;
+  /** Top-level tasks due on `dayKey`, with subtasks. Ignored in review week. */
+  dueTasks: TaskForScoring[];
+}
+
+/**
  * Recompute one day's score and upsert its daily_scores row.
  * A day is live (provisional) until its whole *week* has ended — weekly-habit
  * credit reconciles to the uniform weekly total only then.
@@ -158,21 +173,29 @@ export async function recomputeDay(
   settings: SettingsRow,
   dayKey: DayKey,
   now = new Date(),
+  prefetched?: DayScoringInputs,
 ): Promise<DaySnapshot> {
   const today = todayKey(settings, now);
   const isLive = weekEnd(dayKey) >= today;
 
-  const block = await activeBlockFor(userId, dayKey);
+  const block = prefetched ? prefetched.block : await activeBlockFor(userId, dayKey);
   const reviewWeek = block ? isReviewWeekFn(dayKey, block.startDate, block.endDate) : false;
 
-  const [dueTasks, dayHabits, reps, mood] = await Promise.all([
-    reviewWeek ? Promise.resolve([]) : tasksForScoring(userId, dayKey, settings),
-    applicableHabits(userId, dayKey, settings),
-    repCounts(userId, weekStart(dayKey), weekEnd(dayKey)),
-    db.query.moodEntries.findFirst({
-      where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, dayKey)),
-    }),
-  ]);
+  const [dueTasks, dayHabits, reps, mood] = prefetched
+    ? ([
+        reviewWeek ? [] : prefetched.dueTasks,
+        prefetched.dayHabits,
+        prefetched.reps,
+        prefetched.mood,
+      ] as const)
+    : await Promise.all([
+        reviewWeek ? Promise.resolve([]) : tasksForScoring(userId, dayKey, settings),
+        applicableHabits(userId, dayKey, settings),
+        repCounts(userId, weekStart(dayKey), weekEnd(dayKey)),
+        db.query.moodEntries.findFirst({
+          where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, dayKey)),
+        }),
+      ]);
 
   const taskResult = taskComponent(dueTasks);
 
