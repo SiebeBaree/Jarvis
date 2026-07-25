@@ -82,11 +82,11 @@ struct RecentDaysStrip: View {
         .contextMenu {
             if !beforeStart {
                 Button("Add one") {
-                    Task { await store.logHabit(entry.habit.id, dayKey: dayKeyParam(day)) }
+                    store.logHabit(entry.habit.id, dayKey: dayKeyParam(day))
                 }
                 .disabled(habit.type != .weeklyFrequency && day.reps >= target)
                 Button("Remove one") {
-                    Task { await store.unlogHabit(entry.habit.id, dayKey: dayKeyParam(day)) }
+                    store.unlogHabit(entry.habit.id, dayKey: dayKeyParam(day))
                 }
                 .disabled(day.reps == 0)
             }
@@ -103,9 +103,9 @@ struct RecentDaysStrip: View {
         let target = habit.type == .multiDaily ? habit.targetReps : 1
         Task {
             if day.reps < target {
-                await store.logHabit(habit.id, dayKey: dayKeyParam(day))
+                store.logHabit(habit.id, dayKey: dayKeyParam(day))
             } else {
-                await store.unlogHabit(habit.id, dayKey: dayKeyParam(day))
+                store.unlogHabit(habit.id, dayKey: dayKeyParam(day))
             }
         }
     }

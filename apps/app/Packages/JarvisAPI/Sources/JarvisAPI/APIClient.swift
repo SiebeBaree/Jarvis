@@ -198,6 +198,39 @@ public actor APIClient {
         return (request, session)
     }
 
+    /// Replays a already-encoded request and discards the response body.
+    /// The offline mutation queue stores requests as (method, path, JSON) so
+    /// it can persist and retry them; it owns its own retry policy, so this
+    /// deliberately does not retry internally.
+    public func sendStored(method: String, path: String, body: Data?) async throws {
+        var (request, session) = try makeRequest(method: method, path: path, body: nil as EmptyBody?)
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIClientError.network(underlying: error.localizedDescription)
+        }
+
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401 { throw APIClientError.unauthorized }
+        guard (200..<300).contains(status) else {
+            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
+                throw APIClientError.api(
+                    code: envelope.error.code,
+                    message: envelope.error.message,
+                    status: status,
+                )
+            }
+            throw APIClientError.api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+        }
+    }
+
     /// Like send(), but with a raw (non-JSON) request body — photo uploads.
     func upload<T: Decodable & Sendable>(
         _ type: T.Type,

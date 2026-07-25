@@ -32,15 +32,15 @@ final class PlanStore {
 
     func load(force: Bool = false) async {
         guard let model else { return }
-        if !force, let cached: CurrentBlockResponse = model.cache.get("blocks/current") {
-            content = .loaded(cached)
-            return
+        if !force, let cached = model.store.read(CurrentBlockResponse.self, .currentBlock) {
+            content = .loaded(cached.value)
+            if cached.isFresh { return }
         }
         if content.value == nil { content = .loading }
         do {
             let response = try await model.api.currentBlock()
             content = .loaded(response)
-            model.cache.set("blocks/current", response)
+            model.store.write(response, .currentBlock)
             tacticWeekOverrides = [:]
         } catch {
             model.handle(error)
@@ -174,8 +174,77 @@ final class PlanStore {
         }
     }
 
+    /// Adds a goal to the block currently on screen. Goals created from
+    /// Settings deliberately carry no block; these must, or the Plan tab
+    /// (which lists a block's goals) would never show them.
+    @discardableResult
+    func createGoal(title: String, description: String?, areaId: String?) async -> Bool {
+        guard let model, let blockId = content.value?.block?.id else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        do {
+            _ = try await model.api.createGoal(
+                GoalCreateRequest(
+                    title: trimmed,
+                    description: description,
+                    areaId: areaId,
+                    blockId: blockId,
+                ),
+            )
+            mutationError = nil
+            model.invalidate([.goal, .block])
+            await load(force: true)
+            return true
+        } catch {
+            model.handle(error)
+            mutationError = TodayStore.message(for: error)
+            return false
+        }
+    }
+
+    /// Moves the block to a new start date. Unlike the tap-sized mutations
+    /// this one awaits: the server snaps the date to a Monday, re-derives the
+    /// end date and status, rescores the affected days, and can reject the
+    /// move outright when it would overlap another block — so the screen has
+    /// to show what actually happened rather than a guess.
+    @discardableResult
+    func moveBlock(_ block: BlockDTO, to startDate: DayKey) async -> Bool {
+        guard let model else { return false }
+        do {
+            _ = try await model.api.patchBlock(id: block.id, ["startDate": .string(startDate)])
+            mutationError = nil
+            // Week numbering shifts, so today's payload and every score view
+            // are affected, not just the plan.
+            model.invalidate([.block, .score, .goal, .tactic])
+            await load(force: true)
+            return true
+        } catch {
+            model.handle(error)
+            mutationError = TodayStore.message(for: error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func renameBlock(_ block: BlockDTO, to title: String) async -> Bool {
+        guard let model else { return false }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != block.title else { return true }
+        do {
+            _ = try await model.api.patchBlock(id: block.id, ["title": .string(trimmed)])
+            mutationError = nil
+            model.invalidate([.block])
+            await load(force: true)
+            return true
+        } catch {
+            model.handle(error)
+            mutationError = TodayStore.message(for: error)
+            return false
+        }
+    }
+
     /// Runs a mutation; on success invalidates today so every open screen
-    /// (including this one, via `todayRevision`) refetches.
+    /// (including this one, via `dataRevision`) refetches.
     private func run<T: Sendable>(_ operation: (APIClient) async throws -> T) async {
         guard let model else { return }
         do {

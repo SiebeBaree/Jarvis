@@ -75,6 +75,7 @@ struct MainShell: View {
 
     var body: some View {
         shell
+            .overlay(alignment: .bottom) { SyncStatusBar() }
             .onChange(of: model.requestedSection) { _, section in
                 if let section {
                     selection = section

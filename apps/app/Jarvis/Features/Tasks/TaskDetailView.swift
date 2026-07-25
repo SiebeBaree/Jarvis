@@ -121,7 +121,7 @@ struct TaskDetailView: View {
                         .listRowBackground(Color.bgSurface)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                Task { await deleteSubtask(subtask) }
+                                deleteSubtask(subtask)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -180,14 +180,14 @@ struct TaskDetailView: View {
         ) {
             if let templateId = task.templateId {
                 Button("This occurrence", role: .destructive) {
-                    Task { await deleteTask() }
+                    deleteTask()
                 }
                 Button("All future occurrences", role: .destructive) {
-                    Task { await deleteTemplate(templateId) }
+                    deleteTemplate(templateId)
                 }
             } else {
                 Button("Delete", role: .destructive) {
-                    Task { await deleteTask() }
+                    deleteTask()
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -212,7 +212,7 @@ struct TaskDetailView: View {
     private func statusRow(for task: TaskDTO) -> some View {
         HStack(spacing: Space.md) {
             Button {
-                Task { await toggleComplete() }
+                toggleComplete()
             } label: {
                 Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22, weight: .light))
@@ -252,14 +252,14 @@ struct TaskDetailView: View {
                     selection: Binding(
                         get: { DayKeyMath.date(from: dueDate) ?? .now },
                         set: { newDate in
-                            Task { await patch(["dueDate": .string(Self.dayKey(from: newDate))]) }
+                            patch(["dueDate": .string(Self.dayKey(from: newDate))]) { $0.with(dueDate: Self.dayKey(from: newDate)) }
                         },
                     ),
                     displayedComponents: .date,
                 )
                 .labelsHidden()
                 Button {
-                    Task { await patch(["dueDate": .null]) }
+                    patch(["dueDate": .null]) { $0.with(dueDate: .some(nil)) }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(Color.textTertiary)
@@ -268,7 +268,7 @@ struct TaskDetailView: View {
                 .accessibilityLabel("Clear due date")
             } else {
                 Button("None — set date") {
-                    Task { await patch(["dueDate": .string(store.todayKey)]) }
+                    patch(["dueDate": .string(store.todayKey)]) { $0.with(dueDate: store.todayKey) }
                 }
                 .buttonStyle(.jarvisGhost)
             }
@@ -286,14 +286,14 @@ struct TaskDetailView: View {
                     selection: Binding(
                         get: { Self.timeDate(from: dueTime) },
                         set: { newDate in
-                            Task { await patch(["dueTime": .string(Self.timeString(from: newDate))]) }
+                            patch(["dueTime": .string(Self.timeString(from: newDate))]) { $0.with(dueTime: Self.timeString(from: newDate)) }
                         },
                     ),
                     displayedComponents: .hourAndMinute,
                 )
                 .labelsHidden()
                 Button {
-                    Task { await patch(["dueTime": .null]) }
+                    patch(["dueTime": .null]) { $0.with(dueTime: .some(nil)) }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(Color.textTertiary)
@@ -302,7 +302,7 @@ struct TaskDetailView: View {
                 .accessibilityLabel("Clear time")
             } else {
                 Button("None — set time") {
-                    Task { await patch(["dueTime": .string("09:00")]) }
+                    patch(["dueTime": .string("09:00")]) { $0.with(dueTime: "09:00") }
                 }
                 .buttonStyle(.jarvisGhost)
             }
@@ -317,7 +317,7 @@ struct TaskDetailView: View {
             Menu {
                 ForEach(TaskPriority.allCases, id: \.self) { priority in
                     Button {
-                        Task { await patch(["priority": .string(priority.rawValue)]) }
+                        patch(["priority": .string(priority.rawValue)]) { $0.with(priority: priority) }
                     } label: {
                         Label(
                             priority.flagLevel.label,
@@ -340,13 +340,13 @@ struct TaskDetailView: View {
             Spacer(minLength: 0)
             Menu {
                 Button {
-                    Task { await patch(["categoryId": .null]) }
+                    patch(["categoryId": .null]) { $0.with(categoryId: .some(nil)) }
                 } label: {
                     Label("None", systemImage: task.categoryId == nil ? "checkmark" : "circle.dashed")
                 }
                 ForEach(store.categories) { category in
                     Button {
-                        Task { await patch(["categoryId": .string(category.id)]) }
+                        patch(["categoryId": .string(category.id)]) { $0.with(categoryId: category.id) }
                     } label: {
                         Label(category.name, systemImage: task.categoryId == category.id ? "checkmark" : "tag")
                     }
@@ -372,13 +372,13 @@ struct TaskDetailView: View {
             Spacer(minLength: 0)
             Menu {
                 Button {
-                    Task { await patch(["goalId": .null]) }
+                    patch(["goalId": .null]) { $0.with(goalId: .some(nil)) }
                 } label: {
                     Label("None", systemImage: task.goalId == nil ? "checkmark" : "circle.dashed")
                 }
                 ForEach(store.goals) { goal in
                     Button {
-                        Task { await patch(["goalId": .string(goal.id)]) }
+                        patch(["goalId": .string(goal.id)]) { $0.with(goalId: goal.id) }
                     } label: {
                         Label(goal.title, systemImage: task.goalId == goal.id ? "checkmark" : "target")
                     }
@@ -445,7 +445,7 @@ struct TaskDetailView: View {
     private func subtaskRow(_ subtask: TaskRowDTO) -> some View {
         HStack(spacing: Space.md) {
             Button {
-                Task { await toggleSubtask(subtask) }
+                toggleSubtask(subtask)
             } label: {
                 Image(systemName: subtask.status == .done ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18, weight: .light))
@@ -472,7 +472,7 @@ struct TaskDetailView: View {
                 .textFieldStyle(.plain)
                 .font(.bodyJ)
                 .onSubmit {
-                    Task { await addSubtask(to: task) }
+                    addSubtask(to: task)
                 }
         }
         .frame(minHeight: RowHeight.standard)
@@ -480,17 +480,14 @@ struct TaskDetailView: View {
 
     // MARK: - Mutations
 
-    private func patch(_ body: JSONObject) async {
-        do {
-            let updated = try await model.api.patchTask(id: taskId, body)
-            apply(updated)
-            errorMessage = nil
-            model.invalidateToday()
-            await store.fetch()
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
-        }
+    /// Applies `local` to the screen immediately and queues the equivalent
+    /// absolute patch — absolute so replaying it stays correct.
+    private func patch(_ body: JSONObject, local: (TaskDTO) -> TaskDTO) {
+        guard let task else { return }
+        let updated = local(task)
+        apply(updated)
+        errorMessage = nil
+        store.patch(task, body, applying: updated)
     }
 
     private func saveTitle() {
@@ -499,7 +496,7 @@ struct TaskDetailView: View {
             titleDraft = task?.title ?? titleDraft
             return
         }
-        Task { await patch(["title": .string(trimmed)]) }
+        patch(["title": .string(trimmed)]) { $0.with(title: trimmed) }
     }
 
     private func saveNotesIfChanged() {
@@ -507,87 +504,80 @@ struct TaskDetailView: View {
         let trimmed = notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let current = task.notes ?? ""
         guard trimmed != current else { return }
-        Task { await patch(["notes": trimmed.isEmpty ? .null : .string(trimmed)]) }
+        patch(["notes": trimmed.isEmpty ? .null : .string(trimmed)]) { $0.with(notes: .some(trimmed.isEmpty ? nil : trimmed)) }
     }
 
-    private func toggleComplete() async {
+    private func toggleComplete() {
         guard let task else { return }
-        do {
-            let updated = task.status == .done
-                ? try await model.api.uncompleteTask(id: task.id)
-                : try await model.api.completeTask(id: task.id)
-            apply(updated)
-            errorMessage = nil
-            model.invalidateToday()
-            await store.fetch()
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
-        }
+        apply(task.with(status: task.status == .done ? .open : .done))
+        errorMessage = nil
+        store.toggleComplete(task)
     }
 
-    private func toggleSubtask(_ subtask: TaskRowDTO) async {
-        do {
-            if subtask.status == .done {
-                _ = try await model.api.uncompleteTask(id: subtask.id)
-            } else {
-                _ = try await model.api.completeTask(id: subtask.id)
-            }
-            errorMessage = nil
-            model.invalidateToday()
-            if let fresh = await store.refreshTask(id: taskId) { apply(fresh) }
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
+    private func toggleSubtask(_ subtask: TaskRowDTO) {
+        guard let task else { return }
+        let done = subtask.status == .done
+        var updated = task
+        updated.subtasks = task.subtasks.map {
+            $0.id == subtask.id ? $0.with(status: done ? .open : .done) : $0
         }
+        apply(updated)
+        errorMessage = nil
+        model.mutate(
+            "POST",
+            "/tasks/\(subtask.id)/\(done ? "uncomplete" : "complete")",
+            entities: [.task, .score],
+            label: "\"\(subtask.title)\"",
+        )
     }
 
-    private func addSubtask(to task: TaskDTO) async {
+    private func addSubtask(to task: TaskDTO) {
         let trimmed = newSubtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        do {
-            _ = try await model.api.createTask(
-                TaskCreateRequest(title: trimmed, dueDate: task.dueDate, parentTaskId: task.id),
-            )
-            newSubtaskTitle = ""
-            errorMessage = nil
-            model.invalidateToday()
-            if let fresh = await store.refreshTask(id: taskId) { apply(fresh) }
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
-        }
+        let id = UUID().uuidString
+        var updated = task
+        updated.subtasks = task.subtasks + [.locallyCreated(id: id, title: trimmed, dueDate: task.dueDate, parentTaskId: task.id)]
+        apply(updated)
+        newSubtaskTitle = ""
+        errorMessage = nil
+        model.mutate(
+            "POST",
+            "/tasks",
+            body: TaskCreateRequest(id: id, title: trimmed, dueDate: task.dueDate, parentTaskId: task.id),
+            entities: [.task, .score],
+            label: "\"\(trimmed)\"",
+        )
     }
 
-    private func deleteSubtask(_ subtask: TaskRowDTO) async {
-        do {
-            _ = try await model.api.deleteTask(id: subtask.id)
-            errorMessage = nil
-            model.invalidateToday()
-            if let fresh = await store.refreshTask(id: taskId) { apply(fresh) }
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func deleteTask() async {
+    private func deleteSubtask(_ subtask: TaskRowDTO) {
         guard let task else { return }
-        await store.delete(task)
+        var updated = task
+        updated.subtasks = task.subtasks.filter { $0.id != subtask.id }
+        apply(updated)
+        errorMessage = nil
+        model.mutate(
+            "DELETE",
+            "/tasks/\(subtask.id)",
+            entities: [.task, .score],
+            label: "\"\(subtask.title)\"",
+        )
+    }
+
+    private func deleteTask() {
+        guard let task else { return }
+        store.delete(task)
         close()
     }
 
-    private func deleteTemplate(_ templateId: String) async {
-        do {
-            _ = try await model.api.deleteTemplate(id: templateId)
-            errorMessage = nil
-            model.invalidateToday()
-            await store.fetch()
-            close()
-        } catch {
-            model.handle(error)
-            errorMessage = error.localizedDescription
-        }
+    private func deleteTemplate(_ templateId: String) {
+        errorMessage = nil
+        model.mutate(
+            "DELETE",
+            "/recurrence-templates/\(templateId)",
+            entities: [.task],
+            label: "the repeat rule",
+        )
+        close()
     }
 
     private func close() {

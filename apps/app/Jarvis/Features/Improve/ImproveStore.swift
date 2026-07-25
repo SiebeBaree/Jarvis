@@ -26,14 +26,14 @@ final class ImproveStore {
 
     func load(force: Bool = false) async {
         guard let model else { return }
-        if !force, let cached: ImprovementAreaListResponse = model.cache.get("improvement-areas") {
-            areas = .loaded(cached)
-            return
+        if !force, let cached = model.store.read(ImprovementAreaListResponse.self, .improvementAreas) {
+            areas = .loaded(cached.value)
+            if cached.isFresh { return }
         }
         do {
             let response = try await model.api.improvementAreas()
             areas = .loaded(response)
-            model.cache.set("improvement-areas", response)
+            model.store.write(response, .improvementAreas)
         } catch {
             model.handle(error)
             if areas.value == nil { areas = .failed(TodayStore.message(for: error)) }

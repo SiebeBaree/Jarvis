@@ -18,19 +18,19 @@ enum TrendsRange: Int, CaseIterable, Identifiable {
 @Observable
 @MainActor
 final class TrendsStore {
-    struct WeekColumn: Identifiable {
+    struct WeekColumn: Codable, Identifiable {
         let id: String // week-start dayKey
         let label: String
         let avg: Double?
     }
 
-    struct WeeklyAverages {
+    struct WeeklyAverages: Codable {
         var currentAvg: Double?
         var previousAvg: Double?
         var columns: [WeekColumn]
     }
 
-    struct HabitHeatRow: Identifiable {
+    struct HabitHeatRow: Codable, Identifiable {
         var id: String { habit.id }
         let habit: HabitDTO
         let days: [CalendarDayDTO]
@@ -48,9 +48,7 @@ final class TrendsStore {
 
     func load(range: TrendsRange, force: Bool = false) async {
         if force, let model {
-            model.cache.remove("trends:scores:\(range.rawValue)")
-            model.cache.remove("trends:weekly")
-            model.cache.remove("trends:heatmap")
+            model.invalidate([.score, .habit, .mood, .task])
             weekly = .idle
             heatmap = .idle
         }
@@ -62,10 +60,10 @@ final class TrendsStore {
 
     func loadScores(range: TrendsRange) async {
         guard let model else { return }
-        let cacheKey = "trends:scores:\(range.rawValue)"
-        if let cached: [ScorePointDTO] = model.cache.get(cacheKey) {
-            scores = .loaded(cached)
-            return
+        let cacheKey = CacheKey.trendScores(range: String(range.rawValue))
+        if let cached = model.store.read([ScorePointDTO].self, cacheKey) {
+            scores = .loaded(cached.value)
+            if cached.isFresh { return }
         }
         if scores.value == nil { scores = .loading }
         do {
@@ -76,7 +74,7 @@ final class TrendsStore {
             )
             let sorted = response.scores.sorted { $0.dayKey < $1.dayKey }
             scores = .loaded(sorted)
-            model.cache.set(cacheKey, sorted)
+            model.store.write(sorted, cacheKey)
         } catch {
             model.handle(error)
             scores = .failed(TodayStore.message(for: error))
@@ -88,9 +86,9 @@ final class TrendsStore {
     /// by ISO week client-side.
     private func loadWeekly() async {
         guard let model, weekly.value == nil else { return }
-        if let cached: WeeklyAverages = model.cache.get("trends:weekly") {
-            weekly = .loaded(cached)
-            return
+        if let cached = model.store.read(WeeklyAverages.self, .trendWeekly) {
+            weekly = .loaded(cached.value)
+            if cached.isFresh { return }
         }
         weekly = .loading
         let today = DayKeyMath.todayKey()
@@ -115,7 +113,7 @@ final class TrendsStore {
             model.handle(error)
             weekly = .failed(TodayStore.message(for: error))
         }
-        if let loaded = weekly.value { model.cache.set("trends:weekly", loaded) }
+        if let loaded = weekly.value { model.store.write(loaded, .trendWeekly) }
     }
 
     private func computedWeekly(_ api: APIClient, today: DayKey) async throws -> WeeklyAverages {
@@ -145,9 +143,9 @@ final class TrendsStore {
     /// One current-month calendar row per active habit.
     private func loadHeatmap() async {
         guard let model, heatmap.value == nil else { return }
-        if let cached: [HabitHeatRow] = model.cache.get("trends:heatmap") {
-            heatmap = .loaded(cached)
-            return
+        if let cached = model.store.read([HabitHeatRow].self, .trendHeatmap) {
+            heatmap = .loaded(cached.value)
+            if cached.isFresh { return }
         }
         heatmap = .loading
         do {
@@ -160,7 +158,7 @@ final class TrendsStore {
                 rows.append(HabitHeatRow(habit: habit, days: days.sorted { $0.dayKey < $1.dayKey }))
             }
             heatmap = .loaded(rows)
-            model.cache.set("trends:heatmap", rows)
+            model.store.write(rows, .trendHeatmap)
         } catch {
             model.handle(error)
             heatmap = .failed(TodayStore.message(for: error))

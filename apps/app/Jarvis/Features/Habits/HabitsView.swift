@@ -63,7 +63,7 @@ struct HabitsView: View {
             presenting: archiveCandidate,
         ) { habit in
             Button("Archive \(habit.name)", role: .destructive) {
-                Task { await store.archive(habit) }
+                store.archive(habit)
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
@@ -73,7 +73,7 @@ struct HabitsView: View {
             store.configure(model)
             await store.load()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.load() }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -216,7 +216,7 @@ struct HabitsView: View {
         .contextMenu {
             Button("Edit") { editingHabit = habit }
             Button(habit.pausedAt == nil ? "Pause" : "Resume") {
-                Task { await store.setPaused(habit, paused: habit.pausedAt == nil) }
+                store.setPaused(habit, paused: habit.pausedAt == nil)
             }
             Button("Archive", role: .destructive) { archiveCandidate = habit }
         }
@@ -229,9 +229,9 @@ struct HabitsView: View {
             Button {
                 Task {
                     if entry.repsToday > 0 {
-                        await store.unlogHabit(entry.habit.id)
+                        store.unlogHabit(entry.habit.id)
                     } else {
-                        await store.logHabit(entry.habit.id)
+                        store.logHabit(entry.habit.id)
                     }
                 }
             } label: {
@@ -246,7 +246,7 @@ struct HabitsView: View {
             HStack(spacing: Space.md) {
                 RepPips(done: entry.repsToday, target: entry.habit.targetReps)
                 logButton(disabled: entry.repsToday >= entry.habit.targetReps) {
-                    Task { await store.logHabit(entry.habit.id) }
+                    store.logHabit(entry.habit.id)
                 }
             }
 
@@ -263,7 +263,7 @@ struct HabitsView: View {
                 )
                 .frame(maxWidth: 180)
                 logButton(disabled: false) {
-                    Task { await store.logHabit(entry.habit.id) }
+                    store.logHabit(entry.habit.id)
                 }
             }
         }
@@ -321,7 +321,7 @@ struct HabitsView: View {
                         }
                         Spacer()
                         Button("Resume") {
-                            Task { await store.setPaused(habit, paused: false) }
+                            store.setPaused(habit, paused: false)
                         }
                         .buttonStyle(.jarvisGhost)
                     }
@@ -331,7 +331,7 @@ struct HabitsView: View {
                     .contextMenu {
                         Button("Edit") { editingHabit = habit }
                         Button("Resume") {
-                            Task { await store.setPaused(habit, paused: false) }
+                            store.setPaused(habit, paused: false)
                         }
                         Button("Archive", role: .destructive) { archiveCandidate = habit }
                     }

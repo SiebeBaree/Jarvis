@@ -107,7 +107,7 @@ struct GoalDetailView: View {
         .onChange(of: goal?.manualProgress) {
             syncManualState()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await loadLinks() }
         }
     }

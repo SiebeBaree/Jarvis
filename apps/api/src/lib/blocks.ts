@@ -22,6 +22,41 @@ export function snapToMonday(dayKey: DayKey): DayKey {
   return weekday === 1 ? dayKey : addDays(dayKey, 8 - weekday);
 }
 
+export type BlockRangeInput = Pick<BlockRow, "id" | "title" | "startDate" | "endDate">;
+
+/**
+ * Throws 409 when [startDate, endDate] overlaps one of the user's blocks.
+ * `excludeId` skips the block being moved, which always overlaps itself.
+ */
+export function assertNoBlockOverlap(
+  existing: BlockRangeInput[],
+  startDate: DayKey,
+  endDate: DayKey,
+  excludeId?: string,
+): void {
+  const overlapping = existing.find(
+    (b) => b.id !== excludeId && b.startDate <= endDate && b.endDate >= startDate,
+  );
+  if (overlapping) {
+    throw new ApiError(409, "block_overlap", `Overlaps existing block "${overlapping.title}"`);
+  }
+}
+
+/**
+ * Status a block should carry for a given range: past → completed, future →
+ * planned, covering today → active unless another block already holds the
+ * single active slot. Used when a block's dates move.
+ */
+export function blockStatusForRange(
+  range: Pick<BlockRow, "startDate" | "endDate">,
+  today: DayKey,
+  otherIsActive: boolean,
+): BlockRow["status"] {
+  if (range.endDate < today) return "completed";
+  if (range.startDate > today) return "planned";
+  return otherIsActive ? "planned" : "active";
+}
+
 /**
  * Pre-insert checks for a new block: throws 409 when [startDate, endDate]
  * overlaps an existing block; returns whether another block is currently
@@ -33,10 +68,7 @@ export async function prepareBlockSlot(
   endDate: DayKey,
 ): Promise<{ hasActive: boolean; nextNumber: number }> {
   const existing = await db.query.blocks.findMany({ where: eq(blocks.userId, userId) });
-  const overlapping = existing.find((b) => b.startDate <= endDate && b.endDate >= startDate);
-  if (overlapping) {
-    throw new ApiError(409, "block_overlap", `Overlaps existing block "${overlapping.title}"`);
-  }
+  assertNoBlockOverlap(existing, startDate, endDate);
   const hasActive = existing.some((b) => b.status === "active");
   const maxNumber = existing.reduce((maxN, b) => Math.max(maxN, b.number), 0);
   return { hasActive, nextNumber: maxNumber + 1 };

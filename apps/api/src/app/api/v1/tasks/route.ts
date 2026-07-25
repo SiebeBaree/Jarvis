@@ -70,22 +70,31 @@ export const POST = handler(async (request: Request) => {
     }
   }
 
-  const [created] = await db
-    .insert(tasks)
-    .values({
-      userId: ctx.userId,
-      title: body.title,
-      notes: body.notes ?? null,
-      dueDate: body.dueDate ?? null,
-      dueTime: body.dueTime ?? null,
-      priority: body.priority ?? "medium",
-      goalId: body.goalId ?? null,
-      categoryId: body.categoryId ?? null,
-      parentTaskId: body.parentTaskId ?? null,
-      sortOrder: body.sortOrder ?? 0,
-    })
-    .returning();
-  if (!created) throw new ApiError(500, "internal_error", "Could not create task");
+  const insert = db.insert(tasks).values({
+    id: body.id,
+    userId: ctx.userId,
+    title: body.title,
+    notes: body.notes ?? null,
+    dueDate: body.dueDate ?? null,
+    dueTime: body.dueTime ?? null,
+    priority: body.priority ?? "medium",
+    goalId: body.goalId ?? null,
+    categoryId: body.categoryId ?? null,
+    parentTaskId: body.parentTaskId ?? null,
+    sortOrder: body.sortOrder ?? 0,
+  });
+  // A client-chosen id makes a retried create a no-op instead of a duplicate.
+  const [created] = await (body.id ? insert.onConflictDoNothing() : insert).returning();
+
+  if (!created) {
+    if (!body.id) throw new ApiError(500, "internal_error", "Could not create task");
+    const existing = await db.query.tasks.findFirst({ where: eq(tasks.id, body.id) });
+    if (!existing) throw new ApiError(500, "internal_error", "Could not create task");
+    if (existing.userId !== ctx.userId) {
+      throw new ApiError(409, "id_conflict", "That task id is already taken");
+    }
+    return NextResponse.json({ ...existing, subtasks: [] });
+  }
 
   if (created.dueDate) {
     await recomputeDay(ctx.userId, ctx.settings, created.dueDate);

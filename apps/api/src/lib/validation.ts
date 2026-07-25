@@ -83,7 +83,8 @@ export const blockCreateSchema = z.object({
 });
 export const blockPatchSchema = z
   .object({
-    title: z.string().min(1).max(200).optional(), // dates are immutable once created
+    title: z.string().min(1).max(200).optional(),
+    startDate: dayKeySchema.optional(), // snapped to a Monday; endDate follows from it
   })
   .strict();
 
@@ -192,6 +193,7 @@ export const taskCategoryPatchSchema = taskCategoryCreateSchema.partial().extend
 
 // ---------- tasks ----------
 export const taskCreateSchema = z.object({
+  id: z.string().uuid().optional(), // client-chosen so a retried create is idempotent
   title: z.string().min(1).max(300),
   notes: z.string().max(5000).nullish(),
   dueDate: dayKeySchema.nullish(),
@@ -302,7 +304,10 @@ export const habitPatchSchema = z
   })
   .strict();
 
-export const habitLogSchema = z.object({ dayKey: dayKeySchema.optional() });
+export const habitLogSchema = z.object({
+  dayKey: dayKeySchema.optional(),
+  completionId: z.string().uuid().optional(), // client-chosen so a replayed log never double-counts
+});
 
 export const calendarQuerySchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, { message: "must be YYYY-MM" }),

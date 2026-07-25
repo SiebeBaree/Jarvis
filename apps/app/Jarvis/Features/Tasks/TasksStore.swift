@@ -76,7 +76,8 @@ final class TasksStore {
 
     // MARK: - Fetching
 
-    private struct SegmentData {
+    /// Codable so a segment survives on disk and paints on a cold launch.
+    private struct SegmentData: Codable {
         var tasks: [TaskDTO]
         var noDate: [TaskDTO]
     }
@@ -98,13 +99,14 @@ final class TasksStore {
 
     private func performFetch(force: Bool) async {
         guard let model else { return }
-        let cacheKey = "tasks:\(segment.rawValue)"
-        if !force, let cached: SegmentData = model.cache.get(cacheKey) {
-            remember(cached.tasks)
-            remember(cached.noDate)
-            noDateTasks = cached.noDate
-            state = .loaded(cached.tasks)
-            return
+        let cacheKey = CacheKey.tasks(segment: segment.rawValue)
+        if !force, let cached = model.store.read(SegmentData.self, cacheKey) {
+            // Render what we have, then revalidate unless it is still fresh.
+            remember(cached.value.tasks)
+            remember(cached.value.noDate)
+            noDateTasks = cached.value.noDate
+            state = .loaded(cached.value.tasks)
+            if cached.isFresh { return }
         }
         if state.value == nil { state = .loading }
         do {
@@ -129,34 +131,36 @@ final class TasksStore {
             remember(data.noDate)
             noDateTasks = data.noDate
             state = .loaded(data.tasks)
-            model.cache.set(cacheKey, data)
+            model.store.write(data, cacheKey)
+            actionError = nil
         } catch {
             model.handle(error)
-            state = .failed(error.localizedDescription)
+            // Keep whatever is on screen; only a first, empty load can fail.
+            if state.value == nil { state = .failed(TodayStore.message(for: error)) }
         }
     }
 
     func fetchGoals() async {
         guard let model else { return }
-        if let cached: [GoalDTO] = model.cache.get("goals") {
-            goals = cached
-            return
+        if let cached = model.store.read([GoalDTO].self, .goals) {
+            goals = cached.value
+            if cached.isFresh { return }
         }
         if let response = try? await model.api.goals() {
             goals = response.goals
-            model.cache.set("goals", response.goals)
+            model.store.write(response.goals, .goals)
         }
     }
 
     func fetchCategories(force: Bool = false) async {
         guard let model else { return }
-        if !force, let cached: [TaskCategoryDTO] = model.cache.get("taskCategories") {
-            categories = cached
-            return
+        if !force, let cached = model.store.read([TaskCategoryDTO].self, .taskCategories) {
+            categories = cached.value
+            if cached.isFresh { return }
         }
         if let response = try? await model.api.taskCategories() {
             categories = response.categories
-            model.cache.set("taskCategories", response.categories)
+            model.store.write(response.categories, .taskCategories)
         }
     }
 
@@ -322,83 +326,108 @@ final class TasksStore {
     }
 
     // MARK: - Mutations
+    //
+    // All local-first: the list changes now, the request goes to the offline
+    // queue, and nothing awaits the network. The queue guarantees ordering and
+    // replay-safety, so a create followed instantly by an edit still lands
+    // in that order even if the device was offline for both.
 
-    /// Optimistic: the row flips instantly, the API call runs behind it, a
-    /// failure restores the previous list.
-    func toggleComplete(_ task: TaskDTO) async {
-        guard let model else { return }
-        let originalState = state
+    func toggleComplete(_ task: TaskDTO) {
         let newStatus: TaskStatus = task.status == .done ? .open : .done
-        let optimistic = task.with(status: newStatus)
-        if let tasks = state.value {
-            state = .loaded(tasks.map { $0.id == task.id ? optimistic : $0 })
-        }
-        cache[task.id] = optimistic
-        do {
-            let updated = newStatus == .done
-                ? try await model.api.completeTask(id: task.id)
-                : try await model.api.uncompleteTask(id: task.id)
-            // The optimistic row already matches the server, so no blocking
-            // refetch here — invalidateToday() schedules one revalidation for
-            // whatever is on screen and drops the cached reads.
-            apply(updated)
-            actionError = nil
-            model.invalidateToday()
-        } catch {
-            model.handle(error)
-            state = originalState
-            cache[task.id] = task
-            actionError = error.localizedDescription
-        }
+        apply(task.with(status: newStatus))
+        model?.mutate(
+            "POST",
+            "/tasks/\(task.id)/\(newStatus == .done ? "complete" : "uncomplete")",
+            entities: [.task, .score],
+            label: "\"\(task.title)\"",
+        )
     }
 
-    /// Optimistic: the row moves to its new day immediately.
-    func reschedule(_ task: TaskDTO, to dayKey: String) async {
-        guard let model else { return }
-        let originalState = state
-        let optimistic = task.with(dueDate: dayKey)
-        if let tasks = state.value {
-            state = .loaded(tasks.map { $0.id == task.id ? optimistic : $0 })
-        }
-        cache[task.id] = optimistic
-        do {
-            let updated = try await model.api.patchTask(id: task.id, ["dueDate": .string(dayKey)])
-            apply(updated)
-            actionError = nil
-            model.invalidateToday()
-        } catch {
-            model.handle(error)
-            state = originalState
-            cache[task.id] = task
-            actionError = error.localizedDescription
-        }
+    func reschedule(_ task: TaskDTO, to dayKey: String) {
+        apply(task.with(dueDate: dayKey))
+        model?.mutate(
+            "PATCH",
+            "/tasks/\(task.id)",
+            body: ["dueDate": JSONValue.string(dayKey)],
+            entities: [.task, .score],
+            label: "\"\(task.title)\"",
+        )
     }
 
-    func delete(_ task: TaskDTO) async {
-        guard let model else { return }
-        let originalState = state
+    func delete(_ task: TaskDTO) {
         if let tasks = state.value {
-            state = .loaded(tasks.filter { $0.id != task.id })
+            setTasks(tasks.filter { $0.id != task.id })
         }
-        do {
-            _ = try await model.api.deleteTask(id: task.id)
-            cache[task.id] = nil
-            actionError = nil
-            model.invalidateToday()
-        } catch {
-            model.handle(error)
-            state = originalState
-            actionError = error.localizedDescription
-        }
+        cache[task.id] = nil
+        model?.mutate(
+            "DELETE",
+            "/tasks/\(task.id)",
+            entities: [.task, .score],
+            label: "\"\(task.title)\"",
+        )
     }
 
-    /// Replaces a task in the loaded list and the detail cache with the
-    /// server's version of it.
+    /// Creates a task with a client-generated id so the row is real (and
+    /// editable) the instant it appears. Returns the id for callers that
+    /// want to navigate to it.
+    @discardableResult
+    func create(_ request: TaskCreateRequest) -> String {
+        let id = request.id ?? UUID().uuidString
+        var withId = request
+        withId.id = id
+        let optimistic = TaskDTO.locallyCreated(
+            id: id,
+            title: request.title,
+            notes: request.notes,
+            dueDate: request.dueDate,
+            dueTime: request.dueTime,
+            priority: request.priority ?? .medium,
+            goalId: request.goalId,
+            categoryId: request.categoryId,
+            parentTaskId: request.parentTaskId,
+        )
+        cache[id] = optimistic
+        if let tasks = state.value, request.parentTaskId == nil {
+            setTasks(tasks + [optimistic])
+        }
+        model?.mutate(
+            "POST",
+            "/tasks",
+            body: withId,
+            entities: [.task, .score],
+            label: "\"\(request.title)\"",
+        )
+        return id
+    }
+
+    /// Applies an absolute patch to a task — absolute so a replay is safe.
+    func patch(_ task: TaskDTO, _ body: JSONObject, applying local: TaskDTO) {
+        apply(local)
+        model?.mutate(
+            "PATCH",
+            "/tasks/\(task.id)",
+            body: body,
+            entities: [.task, .score],
+            label: "\"\(task.title)\"",
+        )
+    }
+
+    /// Replaces a task in the loaded list and the detail cache.
     private func apply(_ task: TaskDTO) {
         cache[task.id] = task
         if let tasks = state.value {
-            state = .loaded(tasks.map { $0.id == task.id ? task : $0 })
+            setTasks(tasks.map { $0.id == task.id ? task : $0 })
         }
+    }
+
+    /// Updates the visible list and mirrors it to the local store, so an
+    /// offline edit is still there after a relaunch.
+    private func setTasks(_ tasks: [TaskDTO]) {
+        state = .loaded(tasks)
+        model?.store.write(
+            SegmentData(tasks: tasks, noDate: noDateTasks),
+            .tasks(segment: segment.rawValue),
+        )
     }
 }
 

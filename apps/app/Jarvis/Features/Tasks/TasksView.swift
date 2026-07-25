@@ -63,8 +63,8 @@ struct TasksView: View {
             }
         }
         .sheet(isPresented: $showingEditor) {
-            TaskEditorView(goals: store.goals, defaultDueDate: store.todayKey) {
-                await store.fetch()
+            TaskEditorView(goals: store.goals, defaultDueDate: store.todayKey) { request in
+                store.create(request)
             }
         }
         #if os(macOS)
@@ -92,7 +92,7 @@ struct TasksView: View {
         }
         // Mutations anywhere (here, Today, the detail sheet) invalidate the
         // cache and bump this; the list then revalidates in the background.
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.fetch() }
         }
         .alert("New category", isPresented: $showNewCategoryAlert) {
@@ -343,14 +343,14 @@ struct TasksView: View {
             category: store.selectedCategoryId == nil ? store.category(for: task.categoryId) : nil,
             overdueLabel: overdueLabel,
             onToggle: {
-                Task { await store.toggleComplete(task) }
+                store.toggleComplete(task)
             },
             onTap: { open(task) },
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if task.status == .open {
                 Button {
-                    Task { await store.toggleComplete(task) }
+                    store.toggleComplete(task)
                 } label: {
                     Label("Complete", systemImage: "checkmark")
                 }
@@ -360,14 +360,14 @@ struct TasksView: View {
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if task.status == .open {
                 Button {
-                    Task { await store.reschedule(task, to: store.todayKey) }
+                    store.reschedule(task, to: store.todayKey)
                 } label: {
                     Label("Today", systemImage: "sun.max")
                 }
                 .tint(.accentPrimary)
 
                 Button {
-                    Task { await store.reschedule(task, to: DayKeyMath.addDays(store.todayKey, 1)) }
+                    store.reschedule(task, to: DayKeyMath.addDays(store.todayKey, 1))
                 } label: {
                     Label("Tomorrow", systemImage: "arrow.right")
                 }

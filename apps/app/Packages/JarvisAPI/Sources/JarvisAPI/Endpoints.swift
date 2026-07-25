@@ -27,6 +27,10 @@ public struct RegisterRequest: Encodable, Sendable {
 }
 
 public struct TaskCreateRequest: Encodable, Sendable {
+    /// Client-generated id. Supplying it makes creation idempotent — the
+    /// server upserts on this key — so a create can be retried or replayed
+    /// from the offline queue without producing duplicates.
+    public var id: String?
     public var title: String
     public var notes: String?
     public var dueDate: DayKey?
@@ -37,6 +41,7 @@ public struct TaskCreateRequest: Encodable, Sendable {
     public var parentTaskId: String?
 
     public init(
+        id: String? = nil,
         title: String,
         notes: String? = nil,
         dueDate: DayKey? = nil,
@@ -46,6 +51,7 @@ public struct TaskCreateRequest: Encodable, Sendable {
         categoryId: String? = nil,
         parentTaskId: String? = nil,
     ) {
+        self.id = id
         self.title = title
         self.notes = notes
         self.dueDate = dueDate
@@ -171,6 +177,11 @@ public struct GoalCreateRequest: Encodable, Sendable {
 
 private struct DayKeyBody: Encodable, Sendable {
     let dayKey: DayKey?
+}
+
+private struct HabitLogBody: Encodable, Sendable {
+    let dayKey: DayKey?
+    let completionId: String?
 }
 
 // MARK: - Endpoints
@@ -310,8 +321,19 @@ extension APIClient {
         try await post(HabitDTO.self, "/habits/\(id)/archive")
     }
 
-    public func logHabit(id: String, dayKey: DayKey? = nil) async throws -> HabitLogResponse {
-        try await post(HabitLogResponse.self, "/habits/\(id)/log", body: DayKeyBody(dayKey: dayKey))
+    /// `completionId` is a client-generated id for the rep being logged.
+    /// Logging inserts a row, so without it a replay would double-count; with
+    /// it the server upserts and a replay is a no-op.
+    public func logHabit(
+        id: String,
+        dayKey: DayKey? = nil,
+        completionId: String? = nil,
+    ) async throws -> HabitLogResponse {
+        try await post(
+            HabitLogResponse.self,
+            "/habits/\(id)/log",
+            body: HabitLogBody(dayKey: dayKey, completionId: completionId),
+        )
     }
 
     public func unlogHabit(id: String, dayKey: DayKey? = nil) async throws -> HabitLogResponse {

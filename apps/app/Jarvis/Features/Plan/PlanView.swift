@@ -25,6 +25,8 @@ struct PlanView: View {
     @State private var showOnboarding = false
     @State private var showManualBlock = false
     @State private var showVision = false
+    @State private var showEditBlock = false
+    @State private var showAddGoal = false
     @State private var showWeeklyReview = false
     @State private var showBlockRetro = false
     @State private var goalRoute: GoalRoute?
@@ -68,11 +70,19 @@ struct PlanView: View {
         .sheet(isPresented: $showManualBlock) {
             ManualBlockSheet(store: store)
         }
+        .sheet(isPresented: $showEditBlock) {
+            if let block = store.content.value?.block {
+                EditBlockSheet(store: store, block: block)
+            }
+        }
+        .sheet(isPresented: $showAddGoal) {
+            AddGoalSheet(store: store)
+        }
         .task {
             store.configure(model)
             await store.load()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.load() }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -198,6 +208,7 @@ struct PlanView: View {
                         .padding(.vertical, 3)
                         .background(Color.accentSubtle, in: Capsule())
                 }
+                editBlockButton
             }
             WeekStrip(
                 currentWeek: response.weekNumber ?? 0,
@@ -218,13 +229,32 @@ struct PlanView: View {
             Text("Block \(block.number) · \(PlanDisplay.rangeLabel(from: block.startDate, to: block.endDate))")
                 .font(.captionJ)
                 .foregroundStyle(Color.textSecondary)
-            Text("Starts \(HabitDisplay.shortLabel(for: block.startDate)) · \(days) \(days == 1 ? "day" : "days") away")
+            HStack(alignment: .firstTextBaseline) {
+                Text(
+                    "Starts \(HabitDisplay.shortLabel(for: block.startDate)) · "
+                        + "\(days) \(days == 1 ? "day" : "days") away",
+                )
                 .font(.headlineJ)
                 .foregroundStyle(Color.accentPrimary)
-                .padding(.top, Space.xs)
+                Spacer(minLength: Space.sm)
+                editBlockButton
+            }
+            .padding(.top, Space.xs)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()
+    }
+
+    private var editBlockButton: some View {
+        Button {
+            showEditBlock = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit block")
     }
 
     // MARK: - Goals
@@ -232,12 +262,22 @@ struct PlanView: View {
     @ViewBuilder
     private func goalsSection(_ response: CurrentBlockResponse) -> some View {
         let goals = response.goals.sorted { $0.sortOrder < $1.sortOrder }
-        if !goals.isEmpty {
+        HStack(alignment: .firstTextBaseline) {
             SectionHeader("Goals")
-                .padding(.top, Space.xs)
-            ForEach(goals) { goal in
-                goalCard(goal, weekNumber: response.weekNumber, tappable: !response.isUpcoming)
-            }
+            Spacer(minLength: Space.sm)
+            Button("Add goal") { showAddGoal = true }
+                .buttonStyle(.jarvisGhost)
+        }
+        .padding(.top, Space.xs)
+
+        if goals.isEmpty {
+            Text("No goals in this block yet.")
+                .font(.subheadJ)
+                .foregroundStyle(Color.textTertiary)
+        }
+
+        ForEach(goals) { goal in
+            goalCard(goal, weekNumber: response.weekNumber, tappable: !response.isUpcoming)
         }
     }
 
@@ -526,6 +566,210 @@ private struct ManualBlockSheet: View {
                 dismiss()
             }
             isSaving = false
+        }
+    }
+}
+
+// MARK: - Edit block sheet
+
+/// Retitle a block or move its start date. Moving matters when a block was
+/// started before the user was actually ready — shifting it forward keeps the
+/// 12 weeks intact instead of burning them.
+private struct EditBlockSheet: View {
+    let store: PlanStore
+    let block: BlockDTO
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var startDate: Date = .now
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    /// The server snaps to Monday; mirroring that here keeps the preview
+    /// honest instead of showing a range the save would not produce.
+    private var snappedStart: DayKey {
+        let key = DayKeyMath.dayFormatter.string(from: startDate)
+        let index = HabitDisplay.weekdayIndex(of: key) // Mon = 1 … Sun = 7
+        return index == 1 ? key : DayKeyMath.addDays(key, 8 - index)
+    }
+
+    private var snappedEnd: DayKey {
+        DayKeyMath.addDays(snappedStart, 13 * 7 - 1)
+    }
+
+    private var hasChanges: Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (!trimmed.isEmpty && trimmed != block.title) || snappedStart != block.startDate
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Block title", text: $title)
+                }
+
+                Section {
+                    DatePicker("Starts", selection: $startDate, displayedComponents: .date)
+                    LabeledContent("Actual start") {
+                        Text("Monday, \(HabitDisplay.shortLabel(for: snappedStart))")
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    LabeledContent("Ends") {
+                        Text(HabitDisplay.shortLabel(for: snappedEnd))
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                } footer: {
+                    Text(
+                        snappedStart == block.startDate
+                            ? "Blocks always start on a Monday and run 13 weeks."
+                            : "Week numbers shift with the start date. Logged habits, "
+                                + "tasks and mood keep their own dates — only the block moves.",
+                    )
+                    .font(.captionJ)
+                    .foregroundStyle(Color.textTertiary)
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.subheadJ)
+                            .foregroundStyle(Color.danger)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Edit block")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(isSaving || !hasChanges)
+                }
+            }
+            .onAppear {
+                title = block.title
+                startDate = DayKeyMath.date(from: block.startDate) ?? .now
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, minHeight: 340)
+        #endif
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        Task {
+            defer { isSaving = false }
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed != block.title {
+                guard await store.renameBlock(block, to: trimmed) else {
+                    errorMessage = store.mutationError
+                    return
+                }
+            }
+            if snappedStart != block.startDate {
+                guard await store.moveBlock(block, to: snappedStart) else {
+                    errorMessage = store.mutationError
+                    return
+                }
+            }
+            dismiss()
+        }
+    }
+}
+
+// MARK: - Add goal sheet
+
+/// Adds a goal to the block on screen. The Settings editor creates goals with
+/// no block, which never surface here — this is the one that attaches.
+private struct AddGoalSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    let store: PlanStore
+
+    @State private var title = ""
+    @State private var details = ""
+    @State private var areaId: String?
+    @State private var areas: [AreaDTO] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    @FocusState private var titleFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Goal", text: $title)
+                        .focused($titleFocused)
+                    TextField("Description (optional)", text: $details, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+                Section {
+                    Picker("Area", selection: $areaId) {
+                        Text("None").tag(String?.none)
+                        ForEach(areas) { area in
+                            Text(area.name).tag(Optional(area.id))
+                        }
+                    }
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .font(.subheadJ)
+                            .foregroundStyle(Color.danger)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("New goal")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { save() }
+                        .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { titleFocused = true }
+            .task {
+                if let response = try? await model.api.areas() {
+                    areas = response.areas.filter { $0.archivedAt == nil }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 400, minHeight: 320)
+        #endif
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        Task {
+            defer { isSaving = false }
+            let trimmedDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+            if await store.createGoal(
+                title: title,
+                description: trimmedDetails.isEmpty ? nil : trimmedDetails,
+                areaId: areaId,
+            ) {
+                dismiss()
+            } else {
+                errorMessage = store.mutationError
+            }
         }
     }
 }

@@ -20,17 +20,18 @@ final class MetricsStore {
         if self.model == nil { self.model = model }
     }
 
-    private struct Snapshot {
+    /// Codable so it survives on disk and paints on a cold launch.
+    private struct Snapshot: Codable {
         var types: [MetricTypeDTO]
         var entries: [String: [MetricEntryDTO]]
     }
 
     func load(force: Bool = false) async {
         guard let model else { return }
-        if !force, let cached: Snapshot = model.cache.get("metrics") {
-            types = .loaded(cached.types)
-            entries = cached.entries
-            return
+        if !force, let cached = model.store.read(Snapshot.self, .metrics) {
+            types = .loaded(cached.value.types)
+            entries = cached.value.entries
+            if cached.isFresh { return }
         }
         if types.value == nil { types = .loading }
         do {
@@ -48,7 +49,7 @@ final class MetricsStore {
                 .mapValues { $0.sorted { $0.dayKey < $1.dayKey } }
             types = .loaded(visibleTypes)
             entries = grouped
-            model.cache.set("metrics", Snapshot(types: visibleTypes, entries: grouped))
+            model.store.write(Snapshot(types: visibleTypes, entries: grouped), .metrics)
         } catch {
             model.handle(error)
             if types.value == nil {

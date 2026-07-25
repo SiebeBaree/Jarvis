@@ -41,6 +41,13 @@ extension APIClient {
         try await post(BlockDTO.self, "/blocks", body: BlockCreateRequest(title: title, startDate: startDate))
     }
 
+    /// Retitles and/or moves a block. The server snaps `startDate` to a
+    /// Monday and derives `endDate` and `status`, so callers must read those
+    /// back from the response rather than assume what they sent.
+    public func patchBlock(id: String, _ patch: JSONObject) async throws -> BlockDTO {
+        try await self.patch(BlockDTO.self, "/blocks/\(id)", body: patch)
+    }
+
     public func activateBlock(id: String) async throws -> BlockDTO {
         try await post(BlockDTO.self, "/blocks/\(id)/activate")
     }

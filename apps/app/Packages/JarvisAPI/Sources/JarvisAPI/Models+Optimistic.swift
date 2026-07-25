@@ -6,6 +6,38 @@ import Foundation
 // modified copies via the package-internal memberwise initializers.
 
 extension TaskDTO {
+    /// A task created on this device, carrying the client-generated id it
+    /// will keep on the server. Lets a new row render instantly and be
+    /// completed/edited before the create request has even been sent.
+    public static func locallyCreated(
+        id: String,
+        title: String,
+        notes: String? = nil,
+        dueDate: DayKey? = nil,
+        dueTime: String? = nil,
+        priority: TaskPriority = .medium,
+        goalId: String? = nil,
+        categoryId: String? = nil,
+        parentTaskId: String? = nil,
+    ) -> TaskDTO {
+        TaskDTO(
+            id: id,
+            title: title,
+            notes: notes,
+            dueDate: dueDate,
+            dueTime: dueTime,
+            priority: priority,
+            status: .open,
+            completedAt: nil,
+            goalId: goalId,
+            categoryId: categoryId,
+            parentTaskId: parentTaskId,
+            templateId: nil,
+            sortOrder: 0,
+            subtasks: [],
+        )
+    }
+
     /// A copy with a new status (completedAt set/cleared to match).
     public func with(status: TaskStatus) -> TaskDTO {
         TaskDTO(
@@ -21,6 +53,36 @@ extension TaskDTO {
                 : nil,
             goalId: goalId,
             categoryId: categoryId,
+            parentTaskId: parentTaskId,
+            templateId: templateId,
+            sortOrder: sortOrder,
+            subtasks: subtasks,
+        )
+    }
+
+    /// A copy with selected fields replaced, for showing an edit before the
+    /// server has confirmed it. The doubly-optional parameters distinguish
+    /// "leave unchanged" (`nil`) from "clear this field" (`.some(nil)`).
+    public func with(
+        title: String? = nil,
+        notes: String?? = nil,
+        dueDate: DayKey?? = nil,
+        dueTime: String?? = nil,
+        priority: TaskPriority? = nil,
+        goalId: String?? = nil,
+        categoryId: String?? = nil,
+    ) -> TaskDTO {
+        TaskDTO(
+            id: id,
+            title: title ?? self.title,
+            notes: notes ?? self.notes,
+            dueDate: dueDate ?? self.dueDate,
+            dueTime: dueTime ?? self.dueTime,
+            priority: priority ?? self.priority,
+            status: status,
+            completedAt: completedAt,
+            goalId: goalId ?? self.goalId,
+            categoryId: categoryId ?? self.categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
             sortOrder: sortOrder,
@@ -45,6 +107,52 @@ extension TaskDTO {
             templateId: templateId,
             sortOrder: sortOrder,
             subtasks: subtasks,
+        )
+    }
+}
+
+extension TaskRowDTO {
+    /// A subtask created on this device, keeping the id it will have on the
+    /// server so it can be ticked or deleted before the create is sent.
+    public static func locallyCreated(
+        id: String,
+        title: String,
+        dueDate: DayKey?,
+        parentTaskId: String,
+    ) -> TaskRowDTO {
+        TaskRowDTO(
+            id: id,
+            title: title,
+            notes: nil,
+            dueDate: dueDate,
+            dueTime: nil,
+            priority: .medium,
+            status: .open,
+            completedAt: nil,
+            goalId: nil,
+            categoryId: nil,
+            parentTaskId: parentTaskId,
+            templateId: nil,
+            sortOrder: 0,
+        )
+    }
+
+    /// A copy with a new status (completedAt set/cleared to match).
+    public func with(status: TaskStatus) -> TaskRowDTO {
+        TaskRowDTO(
+            id: id,
+            title: title,
+            notes: notes,
+            dueDate: dueDate,
+            dueTime: dueTime,
+            priority: priority,
+            status: status,
+            completedAt: status == .done ? ISO8601DateFormatter().string(from: .now) : nil,
+            goalId: goalId,
+            categoryId: categoryId,
+            parentTaskId: parentTaskId,
+            templateId: templateId,
+            sortOrder: sortOrder,
         )
     }
 }

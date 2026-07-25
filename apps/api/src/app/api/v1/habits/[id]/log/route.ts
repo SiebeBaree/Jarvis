@@ -10,8 +10,8 @@ import { habitLogSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
-/** Like parseBody but tolerates an empty body (dayKey is optional). */
-async function parseLogBody(request: Request): Promise<{ dayKey?: string }> {
+/** Like parseBody but tolerates an empty body (every field is optional). */
+async function parseLogBody(request: Request): Promise<{ dayKey?: string; completionId?: string }> {
   const text = await request.text();
   if (!text.trim()) return {};
   let raw: unknown;
@@ -93,6 +93,21 @@ export const POST = handler(
       throw new ApiError(400, "before_start", "Cannot log before the habit's start date");
     }
 
+    // A replay of a client-chosen completion id must land on the same state it
+    // did the first time — before the rep guards, which would otherwise turn a
+    // retried daily log into a spurious 409.
+    if (body.completionId) {
+      const already = await db.query.habitCompletions.findFirst({
+        where: eq(habitCompletions.id, body.completionId),
+      });
+      if (already) {
+        if (already.userId !== ctx.userId || already.habitId !== id) {
+          throw new ApiError(409, "id_conflict", "That completion id is already taken");
+        }
+        return NextResponse.json(await logResult(ctx, id, already.dayKey));
+      }
+    }
+
     const reps = await repsOn(ctx, id, dayKey);
     if (habit.type === "daily" && reps >= 1) {
       throw new ApiError(409, "already_logged", "Habit already logged for that day");
@@ -101,7 +116,10 @@ export const POST = handler(
       throw new ApiError(409, "target_reached", "Daily target already reached");
     }
 
-    await db.insert(habitCompletions).values({ userId: ctx.userId, habitId: id, dayKey });
+    const insert = db
+      .insert(habitCompletions)
+      .values({ id: body.completionId, userId: ctx.userId, habitId: id, dayKey });
+    await (body.completionId ? insert.onConflictDoNothing() : insert);
     return NextResponse.json(await logResult(ctx, id, dayKey));
   },
 );

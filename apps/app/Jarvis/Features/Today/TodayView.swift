@@ -98,7 +98,8 @@ struct TodayView: View {
                 goals: quickEditorGoals,
                 defaultDueDate: store.payload?.dayKey ?? DayKeyMath.todayKey(),
                 initialTitle: newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-            ) {
+            ) { request in
+                store.createTask(request)
                 newTaskTitle = ""
                 isAddingTask = false
             }
@@ -114,7 +115,7 @@ struct TodayView: View {
             store.configure(model)
             await store.load()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.load() }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -367,13 +368,13 @@ struct TodayView: View {
     @ViewBuilder
     private func moodSection(_ payload: DayPayload) -> some View {
         MoodCard(mood: payload.mood) { value in
-            Task { await store.setMood(value) }
+            store.setMood(value)
         }
         if payload.yesterdayMoodMissing,
            !store.backfillSkipped,
            Calendar.current.component(.hour, from: .now) < 12 {
             MoodBackfillRow(
-                onCommit: { value in Task { await store.setYesterdayMood(value) } },
+                onCommit: { value in store.setYesterdayMood(value) },
                 onSkip: { store.backfillSkipped = true },
             )
         }
@@ -395,18 +396,18 @@ struct TodayView: View {
             TaskRow(
                 task: task,
                 overdueLabel: task.dueDate.map { "was due \(HabitDisplay.shortLabel(for: $0))" },
-                onToggle: { Task { await store.completeTask(task) } },
+                onToggle: { store.completeTask(task) },
                 onTap: {},
             )
             .swipeActions(edge: .trailing) {
-                Button("Complete") { Task { await store.completeTask(task) } }
+                Button("Complete") { store.completeTask(task) }
                     .tint(.success)
             }
             .swipeActions(edge: .leading) {
-                Button("Today") { Task { await store.rescheduleTask(task, to: payload.dayKey) } }
+                Button("Today") { store.rescheduleTask(task, to: payload.dayKey) }
                     .tint(.accentPrimary)
                 Button("Tomorrow") {
-                    Task { await store.rescheduleTask(task, to: DayKeyMath.addDays(payload.dayKey, 1)) }
+                    store.rescheduleTask(task, to: DayKeyMath.addDays(payload.dayKey, 1))
                 }
                 .tint(.textTertiary)
             }
@@ -464,11 +465,11 @@ struct TodayView: View {
         ForEach(open) { task in
             TaskRow(
                 task: task,
-                onToggle: { Task { await store.completeTask(task) } },
+                onToggle: { store.completeTask(task) },
                 onTap: {},
             )
             .swipeActions(edge: .trailing) {
-                Button("Complete") { Task { await store.completeTask(task) } }
+                Button("Complete") { store.completeTask(task) }
                     .tint(.success)
             }
         }
@@ -498,7 +499,7 @@ struct TodayView: View {
         ForEach(showCompleted ? completed : []) { task in
             TaskRow(
                 task: task,
-                onToggle: { Task { await store.uncompleteTask(task) } },
+                onToggle: { store.uncompleteTask(task) },
                 onTap: {},
             )
         }
@@ -652,9 +653,7 @@ struct TodayView: View {
         let categoryId = quickCategoryId
         newTaskTitle = ""
         isAddingTask = false
-        Task {
-            await store.createQuickTask(title: title, dueDate: dueDate, priority: priority, categoryId: categoryId)
-        }
+        store.createQuickTask(title: title, dueDate: dueDate, priority: priority, categoryId: categoryId)
     }
 
     private var heroEmptyState: some View {
@@ -734,7 +733,7 @@ struct TodayView: View {
         .onTapGesture { detailRoute = HabitDetailRoute(habitId: entry.habit.id) }
         .contextMenu {
             Button("Undo last") {
-                Task { await store.unlogHabit(entry.habit.id) }
+                store.unlogHabit(entry.habit.id)
             }
             .disabled(entry.repsToday == 0)
             Button("View details") {
@@ -748,12 +747,10 @@ struct TodayView: View {
         switch entry.habit.type {
         case .daily:
             Button {
-                Task {
-                    if entry.repsToday > 0 {
-                        await store.unlogHabit(entry.habit.id)
-                    } else {
-                        await store.logHabit(entry.habit.id)
-                    }
+                if entry.repsToday > 0 {
+                    store.unlogHabit(entry.habit.id)
+                } else {
+                    store.logHabit(entry.habit.id)
                 }
             } label: {
                 Image(systemName: entry.repsToday > 0 ? "checkmark.circle.fill" : "circle")
@@ -768,11 +765,11 @@ struct TodayView: View {
                 RepPips(done: entry.repsToday, target: entry.habit.targetReps)
                 logCapsuleButton(
                     disabled: entry.repsToday >= entry.habit.targetReps,
-                    action: { Task { await store.logHabit(entry.habit.id) } },
+                    action: { store.logHabit(entry.habit.id) },
                 )
                 .contextMenu {
                     Button("Undo last") {
-                        Task { await store.unlogHabit(entry.habit.id) }
+                        store.unlogHabit(entry.habit.id)
                     }
                     .disabled(entry.repsToday == 0)
                 }
@@ -792,7 +789,7 @@ struct TodayView: View {
                 .frame(maxWidth: 190)
                 logCapsuleButton(
                     disabled: false,
-                    action: { Task { await store.logHabit(entry.habit.id) } },
+                    action: { store.logHabit(entry.habit.id) },
                 )
             }
         }

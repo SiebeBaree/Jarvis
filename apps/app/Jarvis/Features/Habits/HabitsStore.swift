@@ -7,7 +7,8 @@ import Observation
 @Observable
 @MainActor
 final class HabitsStore {
-    struct Content {
+    /// Codable so it survives on disk and paints on a cold launch.
+    struct Content: Codable {
         var habits: [HabitDTO]
         var areas: [AreaDTO]
         var today: DayPayload
@@ -30,14 +31,12 @@ final class HabitsStore {
         if self.model == nil { self.model = model }
     }
 
-    private static let cacheKey = "habits:content"
-
     func load(force: Bool = false) async {
         guard let model else { return }
-        if !force, let cached: Content = model.cache.get(Self.cacheKey) {
-            content = .loaded(cached)
-            loadStats(for: cached.habits)
-            return
+        if !force, let cached = model.store.read(Content.self, .habits) {
+            content = .loaded(cached.value)
+            loadStats(for: cached.value.habits)
+            if cached.isFresh { return }
         }
         if content.value == nil { content = .loading }
         do {
@@ -51,7 +50,7 @@ final class HabitsStore {
                 today: today,
             )
             content = .loaded(loaded)
-            model.cache.set(Self.cacheKey, loaded)
+            model.store.write(loaded, .habits)
             loadStats(for: loaded.habits)
         } catch {
             model.handle(error)
@@ -132,25 +131,23 @@ final class HabitsStore {
     }
 
     // MARK: - Mutations
+    //
+    // Local-first, like Today: reps flip now and the request goes to the
+    // offline queue. Logging inserts a row server-side, so each log carries
+    // its own completion id — without one a queue replay would count twice.
 
-    /// Optimistic: reps flip instantly, rollback on failure. A `dayKey`
-    /// targets a past day from the 7-day backfill strip; nil = today.
-    func logHabit(_ habitId: String, dayKey: DayKey? = nil) async {
-        await adjustReps(habitId, dayKey: dayKey, delta: 1) { try await $0.logHabit(id: habitId, dayKey: dayKey) }
+    /// A `dayKey` targets a past day from the 7-day backfill strip; nil = today.
+    func logHabit(_ habitId: String, dayKey: DayKey? = nil) {
+        adjustReps(habitId, dayKey: dayKey, delta: 1)
     }
 
-    func unlogHabit(_ habitId: String, dayKey: DayKey? = nil) async {
-        await adjustReps(habitId, dayKey: dayKey, delta: -1) { try await $0.unlogHabit(id: habitId, dayKey: dayKey) }
+    func unlogHabit(_ habitId: String, dayKey: DayKey? = nil) {
+        adjustReps(habitId, dayKey: dayKey, delta: -1)
     }
 
-    private func adjustReps(
-        _ habitId: String,
-        dayKey: DayKey?,
-        delta: Int,
-        _ operation: (APIClient) async throws -> some Sendable,
-    ) async {
+    private func adjustReps(_ habitId: String, dayKey: DayKey?, delta: Int) {
         guard let model else { return }
-        let original = content
+        let name = content.value?.habits.first { $0.id == habitId }?.name ?? "habit"
         if var loaded = content.value {
             let today = loaded.today.dayKey
             let weekStart = HabitDisplay.weekStart(of: today)
@@ -161,41 +158,53 @@ final class HabitsStore {
                 }
                 return entry.adjustingReps(by: delta)
             }
-            content = .loaded(loaded)
+            apply(loaded)
         }
-        do {
-            _ = try await operation(model.api)
-            mutationError = nil
-            invalidateStats(for: habitId)
-            model.invalidateToday()
-        } catch {
-            model.handle(error)
-            content = original
-            mutationError = TodayStore.message(for: error)
-        }
+        invalidateStats(for: habitId)
+        model.mutate(
+            delta > 0 ? "POST" : "DELETE",
+            "/habits/\(habitId)/log",
+            body: HabitLogPayload(
+                dayKey: dayKey,
+                completionId: delta > 0 ? UUID().uuidString : nil,
+            ),
+            entities: [.habit, .score],
+            label: name,
+        )
     }
 
-    func setPaused(_ habit: HabitDTO, paused: Bool) async {
-        await run { try await $0.patchHabit(id: habit.id, ["paused": .bool(paused)]) }
+    private nonisolated struct HabitLogPayload: Encodable, Sendable {
+        let dayKey: DayKey?
+        let completionId: String?
     }
 
-    func archive(_ habit: HabitDTO) async {
-        await run { try await $0.archiveHabit(id: habit.id) }
+    func setPaused(_ habit: HabitDTO, paused: Bool) {
+        model?.mutate(
+            "PATCH",
+            "/habits/\(habit.id)",
+            body: ["paused": JSONValue.bool(paused)],
+            entities: [.habit, .score],
+            label: habit.name,
+        )
     }
 
-    private func run<T: Sendable>(
-        invalidatingStatsFor habitId: String? = nil,
-        _ operation: (APIClient) async throws -> T,
-    ) async {
-        guard let model else { return }
-        do {
-            _ = try await operation(model.api)
-            mutationError = nil
-            if let habitId { invalidateStats(for: habitId) }
-            model.invalidateToday()
-        } catch {
-            model.handle(error)
-            mutationError = TodayStore.message(for: error)
+    func archive(_ habit: HabitDTO) {
+        if var loaded = content.value {
+            loaded.habits = loaded.habits.filter { $0.id != habit.id }
+            apply(loaded)
         }
+        model?.mutate(
+            "POST",
+            "/habits/\(habit.id)/archive",
+            entities: [.habit, .score],
+            label: habit.name,
+        )
+    }
+
+    /// Updates the screen and mirrors it to the local store, so an offline
+    /// edit is still there after a relaunch.
+    private func apply(_ loaded: Content) {
+        content = .loaded(loaded)
+        model?.store.write(loaded, .habits)
     }
 }

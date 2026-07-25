@@ -48,7 +48,7 @@ struct WeekDetailView: View {
             ScoreBreakdownSheet(dayKey: route.dayKey)
         }
         .task { await load() }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await load() }
         }
     }

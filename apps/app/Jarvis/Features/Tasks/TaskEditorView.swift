@@ -12,7 +12,9 @@ struct TaskEditorView: View {
     let defaultDueDate: String
     /// Prefills the title field (quick-add "More…" hands off the typed text).
     var initialTitle: String? = nil
-    var onSaved: () async -> Void
+    /// Receives the fully-formed create request (with its client-generated
+    /// id) so the calling list can show the row before it is sent.
+    var onCreate: (TaskCreateRequest) -> Void
 
     @State private var title = ""
     @State private var notes = ""
@@ -28,8 +30,6 @@ struct TaskEditorView: View {
     @State private var newCategoryName = ""
     @State private var repeats = false
     @State private var rule = RecurrenceRuleDTO(freq: "daily", interval: 1)
-    @State private var isSaving = false
-    @State private var errorMessage: String?
 
     @FocusState private var titleFocused: Bool
 
@@ -100,13 +100,6 @@ struct TaskEditorView: View {
                     }
                 }
 
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .font(.subheadJ)
-                            .foregroundStyle(Color.danger)
-                    }
-                }
             }
             .formStyle(.grouped)
             .navigationTitle("New task")
@@ -119,7 +112,7 @@ struct TaskEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .onChange(of: repeats) { _, isOn in
@@ -166,67 +159,61 @@ struct TaskEditorView: View {
         newCategoryName = ""
         guard !trimmed.isEmpty else { return }
         Task {
-            do {
-                let created = try await model.api.createTaskCategory(
-                    TaskCategoryCreateRequest(
-                        name: trimmed,
-                        colorHex: CategoryPalette.next(after: categories.count),
-                    ),
-                )
-                categories.append(created)
-                categoryId = created.id
-            } catch {
-                model.handle(error)
-                errorMessage = error.localizedDescription
-            }
+            guard let created = try? await model.api.createTaskCategory(
+                TaskCategoryCreateRequest(
+                    name: trimmed,
+                    colorHex: CategoryPalette.next(after: categories.count),
+                ),
+            ) else { return }
+            categories.append(created)
+            categoryId = created.id
+            model.invalidate([.category])
         }
     }
 
+    /// Closes immediately and hands the write to the offline queue — the
+    /// sheet used to sit open for a create round-trip plus a list refetch.
     private func save() {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSaving else { return }
-        isSaving = true
-        errorMessage = nil
-        Task {
-            defer { isSaving = false }
-            do {
-                let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-                let dayKey = DayKeyMath.dayFormatter.string(from: dueDate)
-                let timeString = hasTime && hasDueDate ? Self.timeString(from: dueTime) : nil
-                if repeats {
-                    _ = try await model.api.createTemplate(
-                        TemplateCreateRequest(
-                            title: trimmed,
-                            notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
-                            priority: priority,
-                            goalId: goalId,
-                            categoryId: categoryId,
-                            dueTime: timeString,
-                            rule: normalizedRule(),
-                            startDate: dayKey,
-                        ),
-                    )
-                } else {
-                    _ = try await model.api.createTask(
-                        TaskCreateRequest(
-                            title: trimmed,
-                            notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
-                            dueDate: hasDueDate ? dayKey : nil,
-                            dueTime: timeString,
-                            priority: priority,
-                            goalId: goalId,
-                            categoryId: categoryId,
-                        ),
-                    )
-                }
-                model.invalidateToday()
-                await onSaved()
-                dismiss()
-            } catch {
-                model.handle(error)
-                errorMessage = error.localizedDescription
-            }
+        guard !trimmed.isEmpty else { return }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dayKey = DayKeyMath.dayFormatter.string(from: dueDate)
+        let timeString = hasTime && hasDueDate ? Self.timeString(from: dueTime) : nil
+
+        if repeats {
+            // A template materializes server-side into dated tasks, so there
+            // is no local row to show — but the call still need not be awaited.
+            model.mutate(
+                "POST",
+                "/recurrence-templates",
+                body: TemplateCreateRequest(
+                    title: trimmed,
+                    notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                    priority: priority,
+                    goalId: goalId,
+                    categoryId: categoryId,
+                    dueTime: timeString,
+                    rule: normalizedRule(),
+                    startDate: dayKey,
+                ),
+                entities: [.task, .score],
+                label: "\"\(trimmed)\"",
+            )
+        } else {
+            onCreate(
+                TaskCreateRequest(
+                    id: UUID().uuidString,
+                    title: trimmed,
+                    notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                    dueDate: hasDueDate ? dayKey : nil,
+                    dueTime: timeString,
+                    priority: priority,
+                    goalId: goalId,
+                    categoryId: categoryId,
+                ),
+            )
         }
+        dismiss()
     }
 
     /// Keep only the fields relevant to the chosen frequency.

@@ -47,7 +47,7 @@ struct VisionView: View {
         .task {
             await store.loadVision()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.loadVision(force: true) }
         }
     }

@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 // helper under test never touches the database, so a placeholder is enough.
 process.env.DATABASE_URL ??= "postgresql://unit:test@localhost:5432/unit_test";
 
-const { blockStatusTransitions } = await import("../src/lib/blocks");
+const { assertNoBlockOverlap, blockStatusForRange, blockStatusTransitions } = await import(
+  "../src/lib/blocks"
+);
 
 type Input = Parameters<typeof blockStatusTransitions>[0][number];
 
@@ -62,5 +64,73 @@ describe("blockStatusTransitions", () => {
       "2026-07-10",
     );
     expect(transitions.size).toBe(0);
+  });
+});
+
+type RangeInput = Parameters<typeof assertNoBlockOverlap>[0][number];
+
+const existing: RangeInput[] = [
+  { id: "a", title: "Block 1", startDate: "2026-04-06", endDate: "2026-07-05" },
+  { id: "b", title: "Block 2", startDate: "2026-07-06", endDate: "2026-10-04" },
+];
+
+describe("assertNoBlockOverlap", () => {
+  it("accepts a range that sits in the gap after the last block", () => {
+    expect(() => assertNoBlockOverlap(existing, "2026-10-05", "2027-01-03")).not.toThrow();
+  });
+
+  it("rejects a range overlapping another block, naming it", () => {
+    expect(() => assertNoBlockOverlap(existing, "2026-06-01", "2026-08-30")).toThrowError(
+      /Overlaps existing block "Block 1"/,
+    );
+  });
+
+  it("rejects a touching edge (ranges are inclusive)", () => {
+    expect(() => assertNoBlockOverlap(existing, "2026-10-04", "2027-01-02")).toThrowError(
+      /Block 2/,
+    );
+  });
+
+  it("ignores the block being moved, which always overlaps itself", () => {
+    expect(() => assertNoBlockOverlap(existing, "2026-07-06", "2026-10-04", "b")).not.toThrow();
+  });
+
+  it("still rejects when a moved block lands on a different block", () => {
+    expect(() => assertNoBlockOverlap(existing, "2026-05-04", "2026-08-02", "b")).toThrowError(
+      /Block 1/,
+    );
+  });
+});
+
+describe("blockStatusForRange", () => {
+  it("activates a range covering today when no other block is active", () => {
+    expect(
+      blockStatusForRange({ startDate: "2026-07-06", endDate: "2026-10-04" }, "2026-07-10", false),
+    ).toBe("active");
+  });
+
+  it("plans a range covering today when another block holds the active slot", () => {
+    expect(
+      blockStatusForRange({ startDate: "2026-07-06", endDate: "2026-10-04" }, "2026-07-10", true),
+    ).toBe("planned");
+  });
+
+  it("plans a range moved entirely into the future", () => {
+    expect(
+      blockStatusForRange({ startDate: "2026-08-03", endDate: "2026-11-01" }, "2026-07-10", false),
+    ).toBe("planned");
+  });
+
+  it("completes a range moved entirely into the past", () => {
+    expect(
+      blockStatusForRange({ startDate: "2026-01-05", endDate: "2026-04-05" }, "2026-07-10", false),
+    ).toBe("completed");
+  });
+
+  it("treats the boundary days as covering today", () => {
+    const range = { startDate: "2026-07-06", endDate: "2026-10-04" };
+    expect(blockStatusForRange(range, "2026-07-06", false)).toBe("active");
+    expect(blockStatusForRange(range, "2026-10-04", false)).toBe("active");
+    expect(blockStatusForRange(range, "2026-10-05", false)).toBe("completed");
   });
 });

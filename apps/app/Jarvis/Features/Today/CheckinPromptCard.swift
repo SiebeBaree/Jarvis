@@ -20,7 +20,7 @@ struct CheckinPromptCard: View {
             store.configure(model)
             await store.load()
         }
-        .onChange(of: model.todayRevision) {
+        .onChange(of: model.dataRevision) {
             Task { await store.load() }
         }
         .sheet(isPresented: $showCheckinFlow, onDismiss: {

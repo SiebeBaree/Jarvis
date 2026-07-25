@@ -136,3 +136,41 @@ improvement areas never asked about). Decisions confirmed with the user:
 - **Tasks tab**: inline search and the ⋯ → "Recurring tasks" toolbar menu
   removed. Recurring templates stay reachable from a generated task's detail
   screen.
+
+## 2026-07-25 — local-first client, editable block dates, goals in the Plan tab
+
+- **The client is now local-first.** `RequestCache` (in-memory, wiped whole on
+  every mutation) is replaced by `LocalStore`: a disk-backed cache that never
+  evicts, so screens paint from the last known state instead of a spinner, and
+  invalidation is per-`Entity` — completing a task no longer forces habits, the
+  plan and the vision to refetch. Reads are stale-while-revalidate everywhere.
+- **Writes never block the UI.** `MutationQueue` is a durable outbox: a
+  mutation is applied to local state, persisted to
+  `Application Support/Jarvis/outbox.json`, and flushed in the background,
+  draining FIFO with exponential backoff and an `NWPathMonitor` trigger so
+  reconnecting flushes immediately. A change made offline (or with the app
+  killed mid-flight) survives relaunch. `SyncStatusBar` surfaces pending or
+  failed writes; a normal flush stays silent (2 s grace).
+- **Replay safety is the constraint that shaped the API.** A queued request may
+  be sent twice, so `POST /tasks` and `POST /habits/:id/log` now take
+  client-generated ids (`id`, `completionId`) and upsert on them —
+  habit logging inserts a row, so without this a replay silently double-counted.
+  A replayed create returns 200 with the existing row instead of 201; a
+  cross-user id collision is 409 `id_conflict`. Patches send absolute values,
+  and a DELETE/PATCH that 404s on replay counts as already applied.
+  This is what makes creation instant: the row renders with the id it will keep,
+  so it is completable and editable before the request has been sent.
+- **Block start dates are editable** — this reverses the original
+  "dates are immutable once created" decision in `blockPatchSchema`. Moving a
+  block snaps to Monday, re-derives `endDate` and `status`, rejects overlaps
+  with other blocks (409), and rescores only the days that already have a
+  `daily_scores` row in the old ∪ new range. The Plan tab exposes it (and the
+  block title) behind the slider icon in the block header. Rationale: a block
+  started before the user was actually ready burned real weeks with no recourse.
+- **Goals can be added from the Plan tab.** `GoalsEditorView` in Settings
+  creates goals with no `blockId`, which the Plan tab (which lists a block's
+  goals) never showed — so there was no way to add a goal to the running block.
+  The new sheet always attaches the current block.
+- `POST /blocks/:id` PATCH, `POST /goals` with `blockId`, `GET /tasks/:id`, and
+  both idempotent creates were verified against the real API (14 checks) with a
+  throwaway block and session, all cleaned up afterwards.
