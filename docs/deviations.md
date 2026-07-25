@@ -174,3 +174,32 @@ improvement areas never asked about). Decisions confirmed with the user:
 - `POST /blocks/:id` PATCH, `POST /goals` with `blockId`, `GET /tasks/:id`, and
   both idempotent creates were verified against the real API (14 checks) with a
   throwaway block and session, all cleaned up afterwards.
+
+## 2026-07-25 — Trends: readable weekly average, components rewritten, sized heat dots
+
+- **Weekly average showed "—" whenever today fell outside a block week.**
+  `loadWeekly` picked the block week containing today and gave up if there was
+  none, so a block that had not started yet (or had ended, or a gap between
+  blocks) blanked the card even though scores existed. It now falls back to
+  plain calendar weeks in all of those cases. The mini chart also drops leading
+  weeks with no data — eight mostly-empty columns crowded the axis labels — and
+  annotates each bar with its value.
+- **"Components" replaced by "What's driving your score".** Three sparklines
+  with hidden axes and no numbers conveyed nothing. Each part is now a row:
+  average points per scored day, the weight it is out of, the percentage, and a
+  proportion bar — so the weakest component is obvious. Weights come from
+  `settings.scoreWeights`, matching the Today score card.
+- **Habit-consistency dots are derived from the available width** rather than a
+  fixed 8pt, which stopped short of the trailing edge on iPhone and used barely
+  half the card on Mac. `HeatDotMetrics` (in DesignSystem, next to the other
+  layout tokens) computes the largest dot that fits a month on one row, with
+  spacing proportional to the dot: ~9pt on iPhone and ~18pt on Mac for a 31-day
+  month, both flush to the edges. A phone is genuinely width-bound here — 31
+  dots in 338pt cannot go far past 9pt. Added a legend, since the four dot
+  states (done / partial / missed / not due) were otherwise unexplained.
+- **Debug-only `-jarvisToken <raw>` launch argument** seeds the session on
+  launch. Reinstalling on the simulator clears its keychain, so every rebuild
+  landed on the sign-in screen; this attaches an already-created session
+  instead. `#if DEBUG` only — never compiled into Release. Create the session
+  with an insert into `sessions` (sha256 of the raw token), then
+  `xcrun simctl launch <udid> com.siebebaree.jarvis -jarvisToken <raw>`.

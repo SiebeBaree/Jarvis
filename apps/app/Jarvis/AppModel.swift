@@ -108,9 +108,32 @@ final class AppModel {
 
     // MARK: - Session lifecycle
 
+    #if DEBUG
+    /// Debug-only: `-jarvisToken <raw>` seeds the session from a launch
+    /// argument. Reinstalling on the simulator clears its keychain, so every
+    /// rebuild otherwise lands on the sign-in screen — this lets a dev (or an
+    /// agent) attach an already-created session instead of retyping a
+    /// password. Compiled out of Release entirely.
+    private static var launchArgumentToken: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-jarvisToken"),
+              arguments.index(after: flag) < arguments.endIndex
+        else { return nil }
+        let token = arguments[arguments.index(after: flag)]
+        return token.isEmpty ? nil : token
+    }
+    #endif
+
     @MainActor
     func bootstrap() async {
-        guard let token = Keychain.loadToken() else {
+        var stored = Keychain.loadToken()
+        #if DEBUG
+        if let injected = Self.launchArgumentToken, injected != stored {
+            Keychain.saveToken(injected)
+            stored = injected
+        }
+        #endif
+        guard let token = stored else {
             session = .loggedOut
             return
         }

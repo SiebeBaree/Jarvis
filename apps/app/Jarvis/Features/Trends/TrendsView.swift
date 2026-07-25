@@ -90,17 +90,22 @@ final class TrendsStore {
             weekly = .loaded(cached.value)
             if cached.isFresh { return }
         }
-        weekly = .loading
+        if weekly.value == nil { weekly = .loading }
         let today = DayKeyMath.todayKey()
         do {
-            if let block = try await model.api.currentBlock().block {
-                let weeks = try await model.api.weeklyScores(blockId: block.id).weeks
-                    .sorted { $0.weekNumber < $1.weekNumber }
-                let current = weeks.first { $0.from <= today && today <= $0.to }
-                let previous = current.flatMap { cur in weeks.first { $0.weekNumber == cur.weekNumber - 1 } }
+            // Block weeks are only usable while today actually falls inside
+            // one. A block that has not started yet, has ended, or a gap
+            // between blocks otherwise leaves the card showing "—" even
+            // though there are perfectly good scores to average — so fall
+            // back to plain calendar weeks in all of those cases.
+            if let block = try await model.api.currentBlock().block,
+               let weeks = try? await model.api.weeklyScores(blockId: block.id).weeks
+                   .sorted(by: { $0.weekNumber < $1.weekNumber }),
+               let current = weeks.first(where: { $0.from <= today && today <= $0.to }) {
+                let previous = weeks.first { $0.weekNumber == current.weekNumber - 1 }
                 let started = weeks.filter { $0.from <= today }
                 weekly = .loaded(WeeklyAverages(
-                    currentAvg: current?.avg,
+                    currentAvg: current.avg,
                     previousAvg: previous?.avg,
                     columns: started.suffix(8).map {
                         WeekColumn(id: $0.from, label: "W\($0.weekNumber)", avg: $0.avg)
@@ -111,7 +116,7 @@ final class TrendsStore {
             }
         } catch {
             model.handle(error)
-            weekly = .failed(TodayStore.message(for: error))
+            if weekly.value == nil { weekly = .failed(TodayStore.message(for: error)) }
         }
         if let loaded = weekly.value { model.store.write(loaded, .trendWeekly) }
     }
@@ -177,6 +182,8 @@ struct TrendsView: View {
     @State private var store = TrendsStore()
     @State private var range: TrendsRange = .week
     @State private var breakdownRoute: BreakdownRoute?
+    /// Content width of the heatmap card, used to size a month of dots to fit.
+    @State private var heatWidth: CGFloat = 0
 
     private struct BreakdownRoute: Identifiable {
         let dayKey: DayKey
@@ -437,42 +444,61 @@ struct TrendsView: View {
             }
         }
 
-        if data.columns.contains(where: { $0.avg != nil }) {
-            Chart(data.columns) { column in
+        // Weeks before the account had any data are dead space that also
+        // crowds the axis labels — start the chart at the first scored week.
+        let columns = Array(data.columns.drop { $0.avg == nil })
+        if !columns.isEmpty {
+            Chart(columns) { column in
                 BarMark(
                     x: .value("Week", column.label),
                     y: .value("Avg", column.avg ?? 0),
-                    width: .fixed(16),
+                    width: .fixed(columns.count > 5 ? 16 : 28),
                 )
                 .foregroundStyle(ScoreBands.color(column.avg))
                 .cornerRadius(3)
+                .annotation(position: .top, spacing: 2) {
+                    Text(column.avg.map { "\(Int($0.rounded()))" } ?? "")
+                        .font(.captionJ)
+                        .monospacedDigit()
+                        .foregroundStyle(Color.textTertiary)
+                }
             }
-            .chartYScale(domain: 0...100)
+            .chartYScale(domain: 0...110) // headroom for the value labels
             .chartYAxis(.hidden)
             .chartXAxis {
                 AxisMarks {
                     AxisValueLabel().font(.captionJ).foregroundStyle(Color.textTertiary)
                 }
             }
-            .frame(height: 64)
+            .frame(height: 76)
         }
     }
 
     // MARK: - Component split
 
+    /// Answers "which part of my score is holding it back". Three unlabelled
+    /// sparklines could not: with hidden axes and no numbers there was no way
+    /// to tell what any line was worth. Each row now states the average points
+    /// earned per scored day against that component's weight, so the weakest
+    /// component is obvious at a glance.
     @ViewBuilder
     private var componentSplitCard: some View {
         VStack(alignment: .leading, spacing: Space.md) {
-            SectionHeader("Components")
+            SectionHeader("What's driving your score")
 
             switch store.scores {
             case .loaded(let points):
                 if points.allSatisfy({ $0.taskPoints == nil && $0.habitPoints == nil && $0.feelPoints == nil }) {
-                    emptyLine("Nothing to split yet")
+                    emptyLine("Nothing scored in this range yet")
                 } else {
-                    componentChart("Tasks", points: points, value: \.taskPoints, color: .accentPrimary)
-                    componentChart("Habits", points: points, value: \.habitPoints, color: .success)
-                    componentChart("Feel", points: points, value: \.feelPoints, color: .warning)
+                    Text("Average points per scored day, out of each part's weight.")
+                        .font(.captionJ)
+                        .foregroundStyle(Color.textTertiary)
+
+                    let w = weights
+                    componentRow("Tasks", points: points, value: \.taskPoints, weight: w.tasks, color: .accentPrimary)
+                    componentRow("Habits", points: points, value: \.habitPoints, weight: w.habits, color: .success)
+                    componentRow("Feel", points: points, value: \.feelPoints, weight: w.feel, color: .warning)
                 }
             case .failed(let message):
                 emptyLine(message)
@@ -484,38 +510,57 @@ struct TrendsView: View {
         .jarvisCard()
     }
 
-    private func componentChart(
+    private var weights: (tasks: Double, habits: Double, feel: Double) {
+        guard let w = model.settings?.scoreWeights else { return (40, 40, 20) }
+        return (w.tasks, w.habits, w.feel)
+    }
+
+    private func componentRow(
         _ label: String,
         points: [ScorePointDTO],
         value: KeyPath<ScorePointDTO, Double?>,
+        weight: Double,
         color: Color,
     ) -> some View {
-        let maxValue = max(points.compactMap { $0[keyPath: value] }.max() ?? 1, 1)
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
-                .font(.captionJ)
-                .tracking(0.6)
-                .foregroundStyle(Color.textTertiary)
-            Chart {
-                ForEach(points) { point in
-                    if let date = DayKeyMath.date(from: point.dayKey), let component = point[keyPath: value] {
-                        LineMark(
-                            x: .value("Day", date, unit: .day),
-                            y: .value(label, component),
-                        )
-                        .foregroundStyle(color)
-                        .lineStyle(StrokeStyle(lineWidth: 1.5))
+        // Only days that actually scored this component count — averaging in
+        // days it did not apply to would understate it.
+        let scored = points.compactMap { $0[keyPath: value] }
+        let average = scored.isEmpty ? nil : scored.reduce(0, +) / Double(scored.count)
+        let fraction = average.map { min(max($0 / max(weight, 1), 0), 1) }
+
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.sm) {
+                Text(label)
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textPrimary)
+                Spacer(minLength: Space.sm)
+                Text(average.map { "\(TodayView.formatPoints($0)) / \(TodayView.formatPoints(weight))" } ?? "—")
+                    .font(.monoJ)
+                    .monospacedDigit()
+                    .foregroundStyle(average == nil ? Color.textTertiary : Color.textPrimary)
+                Text(fraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+                    .font(.captionJ)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.textTertiary)
+                    .frame(width: 38, alignment: .trailing)
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.bgSubtle)
+                    if let fraction {
+                        Capsule()
+                            .fill(color)
+                            .frame(width: max(proxy.size.width * fraction, fraction > 0 ? 3 : 0))
                     }
                 }
             }
-            .chartYScale(domain: 0...maxValue)
-            .chartYAxis(.hidden)
-            .chartXAxis(.hidden)
-            .frame(height: 44)
-            .chartOverlay { proxy in
-                tapCatcher(proxy: proxy, points: points)
-            }
+            .frame(height: 6)
         }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(label): \(average.map { "\(TodayView.formatPoints($0)) of \(TodayView.formatPoints(weight))" } ?? "no data")",
+        )
     }
 
     // MARK: - Habit heatmap
@@ -535,8 +580,9 @@ struct TrendsView: View {
                     emptyLine("No active habits")
                 } else {
                     ForEach(rows) { row in
-                        heatRow(row)
+                        heatRow(row, dotSize: HeatDotMetrics.size(width: heatWidth, dayCount: row.days.count))
                     }
+                    heatLegend
                 }
             case .failed(let message):
                 emptyLine(message)
@@ -545,6 +591,14 @@ struct TrendsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Measured on the card's content, so the dots can be sized to fill the
+        // row exactly instead of being a fixed 8pt that left a dead gap at the
+        // trailing edge — most visible on Mac, where the card is twice as wide.
+        .background {
+            GeometryReader { proxy in
+                Color.clear.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { heatWidth = $0 }
+            }
+        }
         .jarvisCard()
     }
 
@@ -553,21 +607,22 @@ struct TrendsView: View {
             .formatted(.dateTime.month(.wide)) ?? ""
     }
 
-    private func heatRow(_ row: TrendsStore.HabitHeatRow) -> some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
+    private func heatRow(_ row: TrendsStore.HabitHeatRow, dotSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
             Text(row.habit.name)
                 .font(.subheadJ)
                 .foregroundStyle(Color.textPrimary)
                 .lineLimit(1)
-            HStack(spacing: 2.5) {
+            HStack(spacing: dotSize * HeatDotMetrics.spacingRatio) {
                 ForEach(row.days) { day in
-                    heatDot(day)
+                    heatDot(day, size: dotSize)
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             breakdownRoute = BreakdownRoute(dayKey: day.dayKey)
                         }
                 }
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, Space.xs)
     }
@@ -575,17 +630,39 @@ struct TrendsView: View {
     /// Simplified calendar-dot language: solid = full, half-opacity = partial,
     /// outline = applicable-but-missed, faint dot = N/A. Never red.
     @ViewBuilder
-    private func heatDot(_ day: CalendarDayDTO) -> some View {
-        let size: CGFloat = 8
+    private func heatDot(_ day: CalendarDayDTO, size: CGFloat) -> some View {
         switch day.state {
         case "full":
             Circle().fill(Color.success).frame(width: size, height: size)
         case "partial":
             Circle().fill(Color.success.opacity(0.45)).frame(width: size, height: size)
         case "none":
-            Circle().strokeBorder(Color.borderStrong, lineWidth: 1).frame(width: size, height: size)
+            Circle()
+                .strokeBorder(Color.borderStrong, lineWidth: max(1, size * 0.1))
+                .frame(width: size, height: size)
         default:
             Circle().fill(Color.bgSubtle).frame(width: size, height: size)
+        }
+    }
+
+    /// The dots carry four distinct meanings; without this they are just dots.
+    private var heatLegend: some View {
+        HStack(spacing: Space.md) {
+            legendItem(Circle().fill(Color.success), "done")
+            legendItem(Circle().fill(Color.success.opacity(0.45)), "partial")
+            legendItem(Circle().strokeBorder(Color.borderStrong, lineWidth: 1), "missed")
+            legendItem(Circle().fill(Color.bgSubtle), "not due")
+            Spacer(minLength: 0)
+        }
+        .padding(.top, Space.xs)
+    }
+
+    private func legendItem(_ shape: some View, _ label: String) -> some View {
+        HStack(spacing: Space.xs) {
+            shape.frame(width: 8, height: 8)
+            Text(label)
+                .font(.captionJ)
+                .foregroundStyle(Color.textTertiary)
         }
     }
 
