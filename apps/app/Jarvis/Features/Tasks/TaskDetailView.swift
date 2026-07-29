@@ -102,7 +102,6 @@ struct TaskDetailView: View {
                 timeRow(for: task)
                 priorityRow(for: task)
                 categoryRow(for: task)
-                goalRow(for: task)
                 if task.templateId != nil {
                     repeatsRow
                 }
@@ -354,38 +353,6 @@ struct TaskDetailView: View {
             } label: {
                 if let category = store.category(for: task.categoryId) {
                     CategoryChip(category: category)
-                } else {
-                    Text("None")
-                        .font(.subheadJ)
-                        .foregroundStyle(Color.textTertiary)
-                }
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-        }
-        .frame(minHeight: RowHeight.standard)
-    }
-
-    private func goalRow(for task: TaskDTO) -> some View {
-        HStack(spacing: Space.md) {
-            propertyLabel("Goal")
-            Spacer(minLength: 0)
-            Menu {
-                Button {
-                    patch(["goalId": .null]) { $0.with(goalId: .some(nil)) }
-                } label: {
-                    Label("None", systemImage: task.goalId == nil ? "checkmark" : "circle.dashed")
-                }
-                ForEach(store.goals) { goal in
-                    Button {
-                        patch(["goalId": .string(goal.id)]) { $0.with(goalId: goal.id) }
-                    } label: {
-                        Label(goal.title, systemImage: task.goalId == goal.id ? "checkmark" : "target")
-                    }
-                }
-            } label: {
-                if let title = store.goalTitle(for: task.goalId) {
-                    GoalChip(title)
                 } else {
                     Text("None")
                         .font(.subheadJ)

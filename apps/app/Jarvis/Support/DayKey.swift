@@ -35,9 +35,30 @@ enum DayKeyMath {
         return dayFormatter.string(from: shifted)
     }
 
+    /// Whole days from `from` to `to` (negative when `to` is earlier).
+    static func diffDays(_ from: String, _ to: String) -> Int {
+        guard let start = date(from: from), let end = date(from: to) else { return 0 }
+        return Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0
+    }
+
     /// "Thursday, July 10" style label for a dayKey.
     static func longLabel(for dayKey: String) -> String {
         guard let date = date(from: dayKey) else { return dayKey }
         return date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    /// "Jul 10" — compact enough for chips and inline copy.
+    static func shortLabel(for dayKey: String) -> String {
+        guard let date = date(from: dayKey) else { return dayKey }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// "Today" / "Yesterday" / "Sunday" — how the day pager names its pages.
+    static func relativeLabel(for dayKey: String, today: String) -> String {
+        switch diffDays(dayKey, today) {
+        case 0: "Today"
+        case 1: "Yesterday"
+        default: date(from: dayKey)?.formatted(.dateTime.weekday(.wide)) ?? dayKey
+        }
     }
 }

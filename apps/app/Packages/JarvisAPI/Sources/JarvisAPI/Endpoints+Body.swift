@@ -67,15 +67,6 @@ extension APIClient {
         try await delete(OkResponse.self, "/metrics/\(typeId)/\(dayKey)")
     }
 
-    // Weekly scores
-    public func weeklyScores(blockId: String) async throws -> WeeklyScoresResponse {
-        try await get(
-            WeeklyScoresResponse.self,
-            "/scores/weekly",
-            query: [URLQueryItem(name: "blockId", value: blockId)],
-        )
-    }
-
     // Photos
     public func photos(from: DayKey, to: DayKey) async throws -> PhotoListResponse {
         try await get(

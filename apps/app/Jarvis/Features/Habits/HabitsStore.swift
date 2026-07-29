@@ -23,6 +23,10 @@ final class HabitsStore {
     private(set) var content: LoadState<Content> = .idle
     /// Lazily loaded stats per habit id (streak chips). Missing = not loaded.
     private(set) var stats: [String: HabitStatsResponse] = [:]
+    /// Habits whose stats a mutation has outdated. The stale value stays on
+    /// screen until the replacement lands — blanking it first made the streak
+    /// chip blink out and back on every tap.
+    private var staleStats: Set<String> = []
     var mutationError: String?
 
     private var model: AppModel?
@@ -39,11 +43,18 @@ final class HabitsStore {
             if cached.isFresh { return }
         }
         if content.value == nil { content = .loading }
+        // Taken before the requests go out: a tap that lands while they are in
+        // flight makes the responses stale on arrival, and applying them would
+        // knock the optimistic rep off the row until the next refresh put it
+        // back. That double-blink is exactly what tapping two habits in a row
+        // used to produce.
+        let ticket = model.writeTicket
         do {
             async let habitsResponse = model.api.habits()
             async let areasResponse = model.api.areas()
             async let todayResponse = model.api.today()
             let (habitsList, areasList, today) = try await (habitsResponse, areasResponse, todayResponse)
+            guard !model.hasWritten(since: ticket) else { return }
             let loaded = Content(
                 habits: habitsList.habits.filter { $0.archivedAt == nil },
                 areas: areasList.areas.filter { $0.archivedAt == nil },
@@ -62,25 +73,30 @@ final class HabitsStore {
         }
     }
 
-    /// Fires concurrent stats fetches for habits without a cached result.
+    /// Fires concurrent stats fetches for habits that have none yet or whose
+    /// stats a mutation has outdated.
     private func loadStats(for habits: [HabitDTO]) {
         guard let model else { return }
-        for habit in habits where stats[habit.id] == nil {
+        for habit in habits where stats[habit.id] == nil || staleStats.contains(habit.id) {
             let id = habit.id
             Task {
-                if let response = try? await model.api.habitStats(id: id) {
+                let ticket = model.writeTicket
+                if let response = try? await model.api.habitStats(id: id),
+                   !model.hasWritten(since: ticket) {
                     stats[id] = response
+                    staleStats.remove(id)
                 }
             }
         }
     }
 
-    /// Drops cached stats so the next load refetches them (after mutations).
+    /// Marks stats as needing a refresh on the next load, without dropping
+    /// what is currently on screen.
     func invalidateStats(for habitId: String? = nil) {
         if let habitId {
-            stats[habitId] = nil
+            staleStats.insert(habitId)
         } else {
-            stats = [:]
+            staleStats.formUnion(stats.keys)
         }
     }
 

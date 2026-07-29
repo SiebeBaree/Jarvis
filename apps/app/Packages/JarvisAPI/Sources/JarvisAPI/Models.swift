@@ -55,7 +55,6 @@ public struct TaskRowDTO: Codable, Sendable, Identifiable, Equatable {
     public let priority: TaskPriority
     public let status: TaskStatus
     public let completedAt: String?
-    public let goalId: String?
     /// Optional so payloads from servers predating categories decode.
     public let categoryId: String?
     public let parentTaskId: String?
@@ -72,7 +71,6 @@ public struct TaskDTO: Codable, Sendable, Identifiable, Equatable {
     public let priority: TaskPriority
     public let status: TaskStatus
     public let completedAt: String?
-    public let goalId: String?
     /// Optional so payloads from servers predating categories decode.
     public let categoryId: String?
     public let parentTaskId: String?
@@ -122,7 +120,6 @@ public struct RecurrenceTemplateDTO: Codable, Sendable, Identifiable, Equatable 
     public let title: String
     public let notes: String?
     public let priority: TaskPriority
-    public let goalId: String?
     /// Optional so payloads from servers predating categories decode.
     public let categoryId: String?
     public let dueTime: String?
@@ -130,9 +127,6 @@ public struct RecurrenceTemplateDTO: Codable, Sendable, Identifiable, Equatable 
     public let startDate: DayKey
     public let endDate: DayKey?
     public let pausedAt: String?
-    /// Whether occurrences still appear during review week. Optional so
-    /// payloads from servers predating the field decode; treat nil as false.
-    public let showInReviewWeek: Bool?
 }
 
 public struct TemplateListResponse: Codable, Sendable {
@@ -156,7 +150,6 @@ public struct HabitDTO: Codable, Sendable, Identifiable, Equatable {
     public let targetReps: Int
     public let plannedDays: [Int]
     public let areaId: String?
-    public let goalId: String?
     public let startDate: DayKey
     public let pausedAt: String?
     public let archivedAt: String?
@@ -274,17 +267,8 @@ public struct DaySnapshotDTO: Codable, Sendable, Equatable {
     public let habitPoints: Double?
     public let feelPoints: Double?
     public let applicableWeight: Double
-    public let isReviewWeek: Bool
     public let isFinal: Bool
     public let breakdown: ScoreBreakdownDTO
-}
-
-public struct BlockSummaryDTO: Codable, Sendable, Equatable {
-    public let id: String
-    public let number: Int
-    public let title: String
-    public let startDate: DayKey
-    public let endDate: DayKey
 }
 
 public struct MoodDTO: Codable, Sendable, Equatable {
@@ -292,24 +276,16 @@ public struct MoodDTO: Codable, Sendable, Equatable {
     public let note: String?
 }
 
+/// One day's worth of everything Today renders. The same shape serves today
+/// and the three days behind it, so the day pager has nothing special to do.
 public struct DayPayload: Codable, Sendable {
     public let dayKey: DayKey
-    public let weekNumber: Int?
-    public let isReviewWeek: Bool
-    public let block: BlockSummaryDTO?
-    /// Set when no block covers today but one starts later — the client
-    /// shows "starts <date>" instead of the plan-setup banner. Optional so
-    /// payloads from servers predating the field still decode.
-    public let upcomingBlock: BlockSummaryDTO?
     public let score: DaySnapshotDTO
     public var tasksDue: [TaskDTO]
+    /// Only populated for today — a past day's overdue list isn't actionable.
     public var overdueTasks: [TaskDTO]
     public var habits: [HabitTodayEntryDTO]
     public var mood: MoodDTO?
-    public let yesterdayMoodMissing: Bool
-    /// Number of paused recurring tasks today. Optional so payloads from
-    /// servers predating the field still decode (absent key → nil; treat as 0).
-    public let pausedTaskCount: Int?
 }
 
 public struct ScorePointDTO: Codable, Sendable, Identifiable, Equatable {
@@ -357,16 +333,78 @@ public struct AreaListResponse: Codable, Sendable {
     public let areas: [AreaDTO]
 }
 
+// MARK: - Goals
+
+public enum GoalHorizon: String, Codable, Sendable, CaseIterable, Identifiable {
+    case short, long
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .short: "Short term"
+        case .long: "Long term"
+        }
+    }
+}
+
+public enum GoalStatus: String, Codable, Sendable, CaseIterable {
+    case active, achieved, dropped
+}
+
+/// How a goal's completion is measured. Mirrors the server's decision so the
+/// client never has to re-derive it.
+public enum GoalTracking: String, Codable, Sendable {
+    case numeric, milestones, none
+}
+
+public struct MilestoneDTO: Codable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let goalId: String
+    public var title: String
+    public var doneAt: String?
+    public var sortOrder: Int
+
+    public var isDone: Bool { doneAt != nil }
+
+    public init(id: String, goalId: String, title: String, doneAt: String? = nil, sortOrder: Int = 0) {
+        self.id = id
+        self.goalId = goalId
+        self.title = title
+        self.doneAt = doneAt
+        self.sortOrder = sortOrder
+    }
+}
+
 public struct GoalDTO: Codable, Sendable, Identifiable, Equatable {
     public let id: String
-    public let blockId: String?
     public let areaId: String?
-    public let title: String
-    public let description: String?
-    public let status: String // active | achieved | dropped
-    public let trackStatus: String? // on_track | at_risk | done (set in weekly reviews)
-    public let manualProgress: Int? // 0-100 override; nil = computed from tactics
-    public let sortOrder: Int
+    public var title: String
+    public var description: String?
+    public var horizon: GoalHorizon
+    public var status: GoalStatus
+    public var startDate: DayKey
+    public var targetDate: DayKey
+    public var unit: String?
+    public var startValue: Double?
+    public var targetValue: Double?
+    public var currentValue: Double?
+    public var sortOrder: Int
+    public var milestones: [MilestoneDTO]
+
+    // Server-computed, so the two bars always agree with the stored numbers.
+    // Defaulted so a locally created goal can be built without restating
+    // them; `recomputed(today:)` fills them in with the server's formula.
+    public var tracking: GoalTracking = .none
+    /// 0...1, or nil when the goal has neither a numeric target nor milestones.
+    public var progress: Double?
+    /// 0...1, clamped — a goal past its date sits at 1.
+    public var timeProgress: Double = 0
+    public var daysTotal: Int = 1
+    /// Negative once the target date has passed.
+    public var daysRemaining: Int = 0
+    public var milestonesDone: Int = 0
+    public var milestonesTotal: Int = 0
 }
 
 public struct GoalListResponse: Codable, Sendable {

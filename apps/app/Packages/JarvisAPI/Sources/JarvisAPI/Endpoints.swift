@@ -36,7 +36,6 @@ public struct TaskCreateRequest: Encodable, Sendable {
     public var dueDate: DayKey?
     public var dueTime: String?
     public var priority: TaskPriority?
-    public var goalId: String?
     public var categoryId: String?
     public var parentTaskId: String?
 
@@ -47,7 +46,6 @@ public struct TaskCreateRequest: Encodable, Sendable {
         dueDate: DayKey? = nil,
         dueTime: String? = nil,
         priority: TaskPriority? = nil,
-        goalId: String? = nil,
         categoryId: String? = nil,
         parentTaskId: String? = nil,
     ) {
@@ -57,7 +55,6 @@ public struct TaskCreateRequest: Encodable, Sendable {
         self.dueDate = dueDate
         self.dueTime = dueTime
         self.priority = priority
-        self.goalId = goalId
         self.categoryId = categoryId
         self.parentTaskId = parentTaskId
     }
@@ -67,7 +64,6 @@ public struct TemplateCreateRequest: Encodable, Sendable {
     public var title: String
     public var notes: String?
     public var priority: TaskPriority?
-    public var goalId: String?
     public var categoryId: String?
     public var dueTime: String?
     public var rule: RecurrenceRuleDTO
@@ -78,7 +74,6 @@ public struct TemplateCreateRequest: Encodable, Sendable {
         title: String,
         notes: String? = nil,
         priority: TaskPriority? = nil,
-        goalId: String? = nil,
         categoryId: String? = nil,
         dueTime: String? = nil,
         rule: RecurrenceRuleDTO,
@@ -88,7 +83,6 @@ public struct TemplateCreateRequest: Encodable, Sendable {
         self.title = title
         self.notes = notes
         self.priority = priority
-        self.goalId = goalId
         self.categoryId = categoryId
         self.dueTime = dueTime
         self.rule = rule
@@ -116,7 +110,6 @@ public struct HabitCreateRequest: Encodable, Sendable {
     public var targetReps: Int?
     public var plannedDays: [Int]?
     public var areaId: String?
-    public var goalId: String?
     public var startDate: DayKey?
 
     public init(
@@ -127,7 +120,6 @@ public struct HabitCreateRequest: Encodable, Sendable {
         targetReps: Int? = nil,
         plannedDays: [Int]? = nil,
         areaId: String? = nil,
-        goalId: String? = nil,
         startDate: DayKey? = nil,
     ) {
         self.name = name
@@ -137,7 +129,6 @@ public struct HabitCreateRequest: Encodable, Sendable {
         self.targetReps = targetReps
         self.plannedDays = plannedDays
         self.areaId = areaId
-        self.goalId = goalId
         self.startDate = startDate
     }
 }
@@ -163,16 +154,69 @@ public struct AreaCreateRequest: Encodable, Sendable {
 }
 
 public struct GoalCreateRequest: Encodable, Sendable {
-    public let title: String
-    public let description: String?
-    public let areaId: String?
-    public let blockId: String?
-    public init(title: String, description: String? = nil, areaId: String? = nil, blockId: String? = nil) {
+    /// Client-generated so a queued create replayed after a retry upserts
+    /// instead of producing a second goal.
+    public var id: String?
+    public var title: String
+    public var description: String?
+    public var horizon: GoalHorizon
+    public var areaId: String?
+    public var startDate: DayKey?
+    public var targetDate: DayKey
+    /// Send unit/startValue/targetValue together, or none of them.
+    public var unit: String?
+    public var startValue: Double?
+    public var targetValue: Double?
+    public var currentValue: Double?
+
+    public init(
+        id: String? = nil,
+        title: String,
+        description: String? = nil,
+        horizon: GoalHorizon = .short,
+        areaId: String? = nil,
+        startDate: DayKey? = nil,
+        targetDate: DayKey,
+        unit: String? = nil,
+        startValue: Double? = nil,
+        targetValue: Double? = nil,
+        currentValue: Double? = nil,
+    ) {
+        self.id = id
         self.title = title
         self.description = description
+        self.horizon = horizon
         self.areaId = areaId
-        self.blockId = blockId
+        self.startDate = startDate
+        self.targetDate = targetDate
+        self.unit = unit
+        self.startValue = startValue
+        self.targetValue = targetValue
+        self.currentValue = currentValue
     }
+}
+
+public struct MilestoneCreateRequest: Encodable, Sendable {
+    public var id: String?
+    public var title: String
+    public var sortOrder: Int?
+
+    public init(id: String? = nil, title: String, sortOrder: Int? = nil) {
+        self.id = id
+        self.title = title
+        self.sortOrder = sortOrder
+    }
+}
+
+public struct GoalValuePutRequest: Encodable, Sendable {
+    public let currentValue: Double
+    public init(currentValue: Double) {
+        self.currentValue = currentValue
+    }
+}
+
+private struct AccountResetRequest: Encodable, Sendable {
+    let confirm = "RESET"
 }
 
 private struct DayKeyBody: Encodable, Sendable {
@@ -235,10 +279,9 @@ extension APIClient {
     }
 
     // Tasks
-    public func tasks(view: String? = nil, goalId: String? = nil) async throws -> TaskListResponse {
+    public func tasks(view: String? = nil) async throws -> TaskListResponse {
         var query: [URLQueryItem] = []
         if let view { query.append(URLQueryItem(name: "view", value: view)) }
-        if let goalId { query.append(URLQueryItem(name: "goalId", value: goalId)) }
         return try await get(TaskListResponse.self, "/tasks", query: query)
     }
 
@@ -382,9 +425,21 @@ extension APIClient {
         try await delete(OkResponse.self, "/areas/\(id)")
     }
 
+    // Account
+    /// Wipes every domain row (tasks, habits, goals, scores, photos) while
+    /// keeping the account itself. The confirm literal is the server's guard
+    /// against a stray call.
+    public func resetAccount() async throws -> OkResponse {
+        try await post(OkResponse.self, "/account/reset", body: AccountResetRequest())
+    }
+
     // Goals
-    public func goals() async throws -> GoalListResponse {
-        try await get(GoalListResponse.self, "/goals")
+    public func goals(includeClosed: Bool = false) async throws -> GoalListResponse {
+        try await get(
+            GoalListResponse.self,
+            "/goals",
+            query: includeClosed ? [URLQueryItem(name: "includeClosed", value: "true")] : [],
+        )
     }
 
     public func createGoal(_ request: GoalCreateRequest) async throws -> GoalDTO {
@@ -397,5 +452,27 @@ extension APIClient {
 
     public func deleteGoal(id: String) async throws -> OkResponse {
         try await delete(OkResponse.self, "/goals/\(id)")
+    }
+
+    /// Absolute value, never a delta — a replayed write lands on the same number.
+    public func putGoalValue(id: String, currentValue: Double) async throws -> GoalDTO {
+        try await put(
+            GoalDTO.self,
+            "/goals/\(id)/value",
+            body: GoalValuePutRequest(currentValue: currentValue),
+        )
+    }
+
+    // Milestones
+    public func createMilestone(goalId: String, _ request: MilestoneCreateRequest) async throws -> MilestoneDTO {
+        try await post(MilestoneDTO.self, "/goals/\(goalId)/milestones", body: request)
+    }
+
+    public func patchMilestone(id: String, _ patch: JSONObject) async throws -> MilestoneDTO {
+        try await self.patch(MilestoneDTO.self, "/milestones/\(id)", body: patch)
+    }
+
+    public func deleteMilestone(id: String) async throws -> OkResponse {
+        try await delete(OkResponse.self, "/milestones/\(id)")
     }
 }

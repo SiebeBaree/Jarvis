@@ -27,28 +27,11 @@ import {
 //   (settings, vision, user_profile) use userId as their PK.
 
 // ---------- enums ----------
-export const blockStatus = pgEnum("block_status", ["planned", "active", "completed"]);
 export const goalStatus = pgEnum("goal_status", ["active", "achieved", "dropped"]);
-export const goalTrackStatus = pgEnum("goal_track_status", ["on_track", "at_risk", "done"]);
+export const goalHorizon = pgEnum("goal_horizon", ["short", "long"]);
 export const taskStatus = pgEnum("task_status", ["open", "done", "cancelled"]);
 export const taskPriority = pgEnum("task_priority", ["low", "medium", "high"]);
 export const habitType = pgEnum("habit_type", ["daily", "multi_daily", "weekly_frequency"]);
-export const interviewStatus = pgEnum("interview_status", [
-  "active",
-  "completed",
-  "applied",
-  "abandoned",
-]);
-export const conversationKind = pgEnum("conversation_kind", [
-  "chat",
-  "weekly_review",
-  "block_review",
-  "seeding",
-]);
-export const memorySource = pgEnum("memory_source", ["chat", "seeding", "manual"]);
-export const messageRole = pgEnum("message_role", ["user", "assistant", "tool"]);
-export const actionStatus = pgEnum("action_status", ["proposed", "executed", "rejected", "expired"]);
-export const briefingKind = pgEnum("briefing_kind", ["morning", "wrapup"]);
 
 // ---------- auth ----------
 export const users = pgTable("users", {
@@ -72,16 +55,6 @@ export const sessions = pgTable("sessions", {
 
 // ---------- settings (singleton per user) ----------
 export type ScoreWeights = { tasks: number; habits: number; feel: number };
-export type AiOverrides = Partial<{
-  baseUrl: string;
-  authMode: "api_key" | "codex_oauth";
-  deepModel: string;
-  fastModel: string;
-  deepEffort: string;
-  fastEffort: string;
-  codexAccessToken: string;
-  codexRefreshToken: string;
-}>;
 
 export const settings = pgTable("settings", {
   userId: uuid("user_id")
@@ -95,7 +68,6 @@ export const settings = pgTable("settings", {
     .notNull()
     .default(sql`'{"tasks":40,"habits":40,"feel":20}'::jsonb`),
   moodScaleMax: smallint("mood_scale_max").notNull().default(5), // UI renders 1..5; stored 0..100
-  aiOverrides: jsonb("ai_overrides").$type<AiOverrides>().notNull().default(sql`'{}'::jsonb`),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -112,48 +84,56 @@ export const areas = pgTable("areas", {
   archivedAt: timestamp("archived_at", { withTimezone: true }),
 }, (t) => [uniqueIndex("areas_user_name_uq").on(t.userId, t.name)]);
 
-// ---------- 12 Week Year ----------
-export const vision = pgTable("vision", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  content: text("content").notNull().default(""),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const blocks = pgTable("blocks", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  number: integer("number").notNull(), // lifetime counter: 1, 2, 3...
-  title: text("title").notNull(),
-  startDate: date("start_date").notNull(), // a Monday (dayKey)
-  endDate: date("end_date").notNull(), // startDate + 13*7 - 1 (12 weeks + review week)
-  status: blockStatus("status").notNull().default("planned"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  uniqueIndex("blocks_user_number_uq").on(t.userId, t.number),
-  index("blocks_user_dates_idx").on(t.userId, t.startDate, t.endDate),
-]);
-// App-enforced invariants: blocks never overlap; at most one is 'active'.
+// ---------- goals ----------
+// A goal is a thing the user is trying to reach by a date. Two independent
+// progress signals sit on it:
+//
+//   time     — startDate → targetDate against today; always available.
+//   progress — how far along the work is. Numeric when the goal carries a
+//              measurable value (0 → 10000 €, 92 → 80 kg), otherwise the
+//              fraction of its milestones that are done, otherwise absent.
+//
+// Comparing the two is the whole point: 70% of the time spent for 40% of the
+// goal is the signal the user opens the tab to see.
 
 export const goals = pgTable("goals", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  // Nullable: Stage 1 allows manual goals before any block exists.
-  blockId: uuid("block_id").references(() => blocks.id, { onDelete: "cascade" }),
   areaId: uuid("area_id").references(() => areas.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description"),
+  horizon: goalHorizon("horizon").notNull().default("short"),
   status: goalStatus("status").notNull().default("active"),
-  trackStatus: goalTrackStatus("track_status"), // set during weekly reviews (Stage 4)
-  manualProgress: smallint("manual_progress"), // 0-100 override; null = computed from tactics
+  startDate: date("start_date").notNull(),
+  targetDate: date("target_date").notNull(),
+  // All three null = untracked (milestones or nothing carry the progress).
+  // startValue is the baseline, so "lose weight" (92 → 80) reads as 0% at the
+  // start rather than 1150%, and a downward goal needs no special casing.
+  unit: text("unit"),
+  startValue: numeric("start_value", { precision: 14, scale: 3, mode: "number" }),
+  targetValue: numeric("target_value", { precision: 14, scale: 3, mode: "number" }),
+  currentValue: numeric("current_value", { precision: 14, scale: 3, mode: "number" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("goals_user_status_idx").on(t.userId, t.status)]);
+
+export const goalMilestones = pgTable("goal_milestones", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  goalId: uuid("goal_id")
+    .notNull()
+    .references(() => goals.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  doneAt: timestamp("done_at", { withTimezone: true }),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("goals_user_block_idx").on(t.userId, t.blockId)]);
+}, (t) => [index("goal_milestones_goal_idx").on(t.goalId, t.sortOrder)]);
 
 // ---------- tasks ----------
 // User-defined task categories (work, personal, household...) — TickTick-style
@@ -184,7 +164,6 @@ export const recurrenceTemplates = pgTable("recurrence_templates", {
   title: text("title").notNull(),
   notes: text("notes"),
   priority: taskPriority("priority").notNull().default("medium"),
-  goalId: uuid("goal_id").references(() => goals.id, { onDelete: "set null" }),
   categoryId: uuid("category_id").references(() => taskCategories.id, { onDelete: "set null" }),
   dueTime: time("due_time"),
   rule: jsonb("rule").$type<RecurrenceRule>().notNull(),
@@ -192,9 +171,6 @@ export const recurrenceTemplates = pgTable("recurrence_templates", {
   endDate: date("end_date"), // null = forever
   pausedAt: timestamp("paused_at", { withTimezone: true }),
   lastGeneratedThrough: date("last_generated_through"), // materialization high-water mark
-  // Week 13 pauses tasks; date-critical recurrences (e.g. monthly investor
-  // update) can opt in to still appearing (they never score during week 13).
-  showInReviewWeek: boolean("show_in_review_week").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -210,7 +186,6 @@ export const tasks = pgTable("tasks", {
   priority: taskPriority("priority").notNull().default("medium"),
   status: taskStatus("status").notNull().default("open"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
-  goalId: uuid("goal_id").references(() => goals.id, { onDelete: "set null" }),
   categoryId: uuid("category_id").references(() => taskCategories.id, { onDelete: "set null" }),
   parentTaskId: uuid("parent_task_id").references((): AnyPgColumn => tasks.id, {
     onDelete: "cascade",
@@ -246,7 +221,6 @@ export const habits = pgTable("habits", {
   // ISO weekdays; soft defaults for weekly habits. Cosmetic only — never used in scoring.
   plannedDays: jsonb("planned_days").$type<number[]>().notNull().default(sql`'[]'::jsonb`),
   areaId: uuid("area_id").references(() => areas.id, { onDelete: "set null" }),
-  goalId: uuid("goal_id").references(() => goals.id, { onDelete: "set null" }),
   startDate: date("start_date").notNull(), // counts toward the score from this dayKey
   pausedAt: timestamp("paused_at", { withTimezone: true }), // paused = excluded from scoring
   archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -294,147 +268,10 @@ export type ScoreBreakdown = {
   }[];
 };
 
-// ---------- tactics (12 Week Year execution layer — feed goal progress, not the daily score) ----------
-export const tactics = pgTable("tactics", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  goalId: uuid("goal_id")
-    .notNull()
-    .references(() => goals.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
-  fromWeek: smallint("from_week").notNull().default(1), // 1-12
-  toWeek: smallint("to_week").notNull().default(12),
-  sortOrder: integer("sort_order").notNull().default(0),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("tactics_goal_idx").on(t.goalId)]);
-
-export const tacticCompletions = pgTable("tactic_completions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  tacticId: uuid("tactic_id")
-    .notNull()
-    .references(() => tactics.id, { onDelete: "cascade" }),
-  weekNumber: smallint("week_number").notNull(), // 1-12 within the block
-  completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("tactic_completions_week_uq").on(t.tacticId, t.weekNumber)]);
-
-// ---------- AI: profile & interview ----------
-export type UserProfileData = {
-  values: string[];
-  constraints: string[];
-  schedule: string;
-  motivations: string[];
-  context: string; // free-form summary of what Jarvis knows
-};
-
-export const userProfile = pgTable("user_profile", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  data: jsonb("data").$type<UserProfileData>().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const interviewSessions = pgTable("interview_sessions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  kind: text("kind").notNull().default("onboarding"), // onboarding | reonboarding | vision
-  status: interviewStatus("status").notNull().default("active"),
-  // Full history: [{ round, phase, questions: [...], answers: [...] }]
-  transcript: jsonb("transcript").$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
-  providerResponseId: text("provider_response_id"), // OpenAI Responses chaining
-  result: jsonb("result"), // completion payload (profile + visionDraft + areas + plan)
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-});
-
-// ---------- AI: conversations, messages, action cards, briefings ----------
-
-export type MessagePart =
-  | { type: "text"; text: string }
-  | { type: "tool_call"; callId: string; name: string; args: unknown }
-  | { type: "tool_result"; callId: string; result: unknown };
-
-export const conversations = pgTable("conversations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  kind: conversationKind("kind").notNull().default("chat"),
-  title: text("title"), // AI-generated after the first exchange
-  blockId: uuid("block_id").references(() => blocks.id, { onDelete: "set null" }),
-  weekNumber: integer("week_number"), // weekly_review: 1-13
-  outcome: jsonb("outcome"), // structured review summary once closed
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("conversations_user_idx").on(t.userId, t.updatedAt)]);
-
-export const messages = pgTable("messages", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  conversationId: uuid("conversation_id")
-    .notNull()
-    .references(() => conversations.id, { onDelete: "cascade" }),
-  role: messageRole("role").notNull(),
-  parts: jsonb("parts").$type<MessagePart[]>().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("messages_conv_idx").on(t.conversationId, t.createdAt)]);
-
-export const proposedActions = pgTable("proposed_actions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  conversationId: uuid("conversation_id")
-    .notNull()
-    .references(() => conversations.id, { onDelete: "cascade" }),
-  messageId: uuid("message_id")
-    .notNull()
-    .references(() => messages.id, { onDelete: "cascade" }),
-  toolName: text("tool_name").notNull(),
-  args: jsonb("args").notNull(), // zod-validated tool args
-  summary: text("summary").notNull(), // template-generated card text (not model-written)
-  status: actionStatus("status").notNull().default("proposed"),
-  result: jsonb("result"), // execution result or rejection note
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-}, (t) => [index("actions_conv_status_idx").on(t.conversationId, t.status)]);
-
-export const briefings = pgTable("briefings", {
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  dayKey: date("day_key").notNull(),
-  kind: briefingKind("kind").notNull().default("morning"),
-  content: text("content").notNull(), // markdown
-  // Wrap-ups regenerate when the day materially changed since generation.
-  fingerprint: text("fingerprint"),
-  model: text("model").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.userId, t.dayKey, t.kind] })]);
-
-// ---------- AI memory (one durable fact per row) ----------
-// Auto-extracted after chat turns; fully user-editable in the Memory screen.
-
-export const memories = pgTable("memories", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  category: text("category").notNull(), // identity|work|health|appearance|preferences|relationships|context
-  content: text("content").notNull(),
-  source: memorySource("source").notNull().default("chat"),
-  conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("memories_user_idx").on(t.userId, t.category)]);
-
 // ---------- improvement areas & weekly photo check-ins ----------
 // Self-improvement areas (posture, clothing, teeth...). One photo check-in per
-// area per week (weekKey = that week's Monday); AI commentary is generated
-// asynchronously after upload. Never feeds the daily score.
+// area per week (weekKey = that week's Monday), so progress is visible by
+// comparing shots side by side. Never feeds the daily score.
 
 export const improvementAreas = pgTable("improvement_areas", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -443,7 +280,8 @@ export const improvementAreas = pgTable("improvement_areas", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   emoji: varchar("emoji", { length: 16 }),
-  // What "better" looks like, in the user's words — feeds the commentary prompt.
+  // What "better" looks like, in the user's words — the yardstick to hold a
+  // new photo against.
   betterLooksLike: text("better_looks_like"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -464,9 +302,6 @@ export const areaCheckins = pgTable("area_checkins", {
   blobUrl: text("blob_url").notNull(),
   contentType: text("content_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  aiCommentary: text("ai_commentary"), // null until generated (async via after())
-  aiModel: text("ai_model"),
-  aiGeneratedAt: timestamp("ai_generated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex("area_checkins_week_uq").on(t.areaId, t.weekKey)]);
 
@@ -523,7 +358,6 @@ export const dailyScores = pgTable("daily_scores", {
   habitPoints: numeric("habit_points", { precision: 5, scale: 2, mode: "number" }),
   feelPoints: numeric("feel_points", { precision: 5, scale: 2, mode: "number" }),
   applicableWeight: numeric("applicable_weight", { precision: 5, scale: 2, mode: "number" }).notNull(),
-  isReviewWeek: boolean("is_review_week").notNull().default(false),
   breakdown: jsonb("breakdown").$type<ScoreBreakdown>().notNull(),
   isFinal: boolean("is_final").notNull().default(false),
   computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),

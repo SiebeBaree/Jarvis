@@ -5,7 +5,6 @@ import Foundation
 public struct ThisWeekCheckinDTO: Codable, Sendable, Equatable {
     public let id: String
     public let dayKey: DayKey
-    public let hasCommentary: Bool
 }
 
 public struct ImprovementAreaDTO: Codable, Sendable, Identifiable, Equatable {
@@ -32,8 +31,6 @@ public struct AreaCheckinDTO: Codable, Sendable, Identifiable, Equatable {
     public let weekKey: DayKey
     public let dayKey: DayKey
     public let url: String
-    public let aiCommentary: String?
-    public let aiGeneratedAt: String?
     public let createdAt: String
 }
 

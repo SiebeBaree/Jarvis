@@ -150,7 +150,6 @@ describe("computeDailyScore", () => {
       taskRaw: 5 / 7,
       habitRaw: 0.8,
       feelRaw: 0.72,
-      isReviewWeek: false,
     });
     expect(r.applicableWeight).toBe(100);
     expect(r.taskPoints).toBeCloseTo(28.57, 1);
@@ -165,7 +164,6 @@ describe("computeDailyScore", () => {
       taskRaw: 0.5,
       habitRaw: 1,
       feelRaw: null,
-      isReviewWeek: false,
     });
     expect(r.applicableWeight).toBe(80);
     expect(r.total).toBe(75); // (20 + 40) / 80 * 100
@@ -178,23 +176,9 @@ describe("computeDailyScore", () => {
       taskRaw: null,
       habitRaw: 0.5,
       feelRaw: 1,
-      isReviewWeek: false,
     });
     expect(r.applicableWeight).toBe(60);
     expect(r.total).toBeCloseTo(((40 * 0.5 + 20) / 60) * 100, 1);
-  });
-
-  it("review week ignores tasks even when provided", () => {
-    const r = computeDailyScore({
-      weights: WEIGHTS,
-      taskRaw: 1,
-      habitRaw: 0.5,
-      feelRaw: 0.5,
-      isReviewWeek: true,
-    });
-    expect(r.applicableWeight).toBe(60);
-    expect(r.taskPoints).toBeNull();
-    expect(r.total).toBeCloseTo(50, 5);
   });
 
   it("returns null (not 0) when nothing is applicable", () => {
@@ -203,7 +187,6 @@ describe("computeDailyScore", () => {
       taskRaw: null,
       habitRaw: null,
       feelRaw: null,
-      isReviewWeek: false,
     });
     expect(r.total).toBeNull();
     expect(r.applicableWeight).toBe(0);

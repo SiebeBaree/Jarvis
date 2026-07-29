@@ -16,7 +16,6 @@ extension TaskDTO {
         dueDate: DayKey? = nil,
         dueTime: String? = nil,
         priority: TaskPriority = .medium,
-        goalId: String? = nil,
         categoryId: String? = nil,
         parentTaskId: String? = nil,
     ) -> TaskDTO {
@@ -29,7 +28,6 @@ extension TaskDTO {
             priority: priority,
             status: .open,
             completedAt: nil,
-            goalId: goalId,
             categoryId: categoryId,
             parentTaskId: parentTaskId,
             templateId: nil,
@@ -51,7 +49,6 @@ extension TaskDTO {
             completedAt: status == .done
                 ? ISO8601DateFormatter().string(from: .now)
                 : nil,
-            goalId: goalId,
             categoryId: categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
@@ -69,7 +66,6 @@ extension TaskDTO {
         dueDate: DayKey?? = nil,
         dueTime: String?? = nil,
         priority: TaskPriority? = nil,
-        goalId: String?? = nil,
         categoryId: String?? = nil,
     ) -> TaskDTO {
         TaskDTO(
@@ -81,7 +77,6 @@ extension TaskDTO {
             priority: priority ?? self.priority,
             status: status,
             completedAt: completedAt,
-            goalId: goalId ?? self.goalId,
             categoryId: categoryId ?? self.categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
@@ -101,7 +96,6 @@ extension TaskDTO {
             priority: priority,
             status: status,
             completedAt: completedAt,
-            goalId: goalId,
             categoryId: categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
@@ -129,7 +123,6 @@ extension TaskRowDTO {
             priority: .medium,
             status: .open,
             completedAt: nil,
-            goalId: nil,
             categoryId: nil,
             parentTaskId: parentTaskId,
             templateId: nil,
@@ -148,7 +141,6 @@ extension TaskRowDTO {
             priority: priority,
             status: status,
             completedAt: status == .done ? ISO8601DateFormatter().string(from: .now) : nil,
-            goalId: goalId,
             categoryId: categoryId,
             parentTaskId: parentTaskId,
             templateId: templateId,
@@ -205,6 +197,42 @@ extension HabitTodayEntryDTO {
         recentDays?.map {
             $0.dayKey == dayKey ? HabitRecentDayDTO(dayKey: $0.dayKey, reps: max($0.reps + applied, 0)) : $0
         }
+    }
+}
+
+extension GoalDTO {
+    /// A goal created on this device, carrying the client-generated id it will
+    /// keep on the server. The derived progress fields start empty — the
+    /// caller fills them in with the same formula the server uses.
+    public static func locallyCreated(
+        id: String,
+        title: String,
+        description: String? = nil,
+        horizon: GoalHorizon,
+        areaId: String? = nil,
+        startDate: DayKey,
+        targetDate: DayKey,
+        unit: String? = nil,
+        startValue: Double? = nil,
+        targetValue: Double? = nil,
+        currentValue: Double? = nil,
+    ) -> GoalDTO {
+        GoalDTO(
+            id: id,
+            areaId: areaId,
+            title: title,
+            description: description,
+            horizon: horizon,
+            status: .active,
+            startDate: startDate,
+            targetDate: targetDate,
+            unit: unit,
+            startValue: startValue,
+            targetValue: targetValue,
+            currentValue: currentValue ?? startValue,
+            sortOrder: 0,
+            milestones: [],
+        )
     }
 }
 

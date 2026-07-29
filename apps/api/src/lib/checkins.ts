@@ -21,7 +21,6 @@ export interface CheckinLike {
   id: string;
   weekKey: string;
   dayKey: string;
-  aiCommentary: string | null;
   createdAt: Date;
 }
 
@@ -34,7 +33,7 @@ export interface ImprovementAreaDTO {
   archived: boolean;
   /** Active area with no check-in for the current week. */
   dueThisWeek: boolean;
-  thisWeek: { id: string; dayKey: string; hasCommentary: boolean } | null;
+  thisWeek: { id: string; dayKey: string } | null;
   lastCheckinAt: string | null; // dayKey of the most recent check-in
 }
 
@@ -45,11 +44,7 @@ export function buildAreaDTO(
 ): ImprovementAreaDTO {
   const thisWeek =
     latestCheckin && latestCheckin.weekKey === currentWeekKey
-      ? {
-          id: latestCheckin.id,
-          dayKey: latestCheckin.dayKey,
-          hasCommentary: latestCheckin.aiCommentary !== null,
-        }
+      ? { id: latestCheckin.id, dayKey: latestCheckin.dayKey }
       : null;
   return {
     id: area.id,

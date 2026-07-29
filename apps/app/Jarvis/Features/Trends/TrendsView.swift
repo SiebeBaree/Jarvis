@@ -93,27 +93,7 @@ final class TrendsStore {
         if weekly.value == nil { weekly = .loading }
         let today = DayKeyMath.todayKey()
         do {
-            // Block weeks are only usable while today actually falls inside
-            // one. A block that has not started yet, has ended, or a gap
-            // between blocks otherwise leaves the card showing "—" even
-            // though there are perfectly good scores to average — so fall
-            // back to plain calendar weeks in all of those cases.
-            if let block = try await model.api.currentBlock().block,
-               let weeks = try? await model.api.weeklyScores(blockId: block.id).weeks
-                   .sorted(by: { $0.weekNumber < $1.weekNumber }),
-               let current = weeks.first(where: { $0.from <= today && today <= $0.to }) {
-                let previous = weeks.first { $0.weekNumber == current.weekNumber - 1 }
-                let started = weeks.filter { $0.from <= today }
-                weekly = .loaded(WeeklyAverages(
-                    currentAvg: current.avg,
-                    previousAvg: previous?.avg,
-                    columns: started.suffix(8).map {
-                        WeekColumn(id: $0.from, label: "W\($0.weekNumber)", avg: $0.avg)
-                    },
-                ))
-            } else {
-                weekly = .loaded(try await computedWeekly(model.api, today: today))
-            }
+            weekly = .loaded(try await computedWeekly(model.api, today: today))
         } catch {
             model.handle(error)
             if weekly.value == nil { weekly = .failed(TodayStore.message(for: error)) }

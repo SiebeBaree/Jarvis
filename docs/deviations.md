@@ -203,3 +203,56 @@ improvement areas never asked about). Decisions confirmed with the user:
   instead. `#if DEBUG` only — never compiled into Release. Create the session
   with an insert into `sessions` (sha256 of the raw token), then
   `xcrun simctl launch <udid> com.siebebaree.jarvis -jarvisToken <raw>`.
+
+## 2026-07-29 — AI and the 12 Week Year removed; goals rebuilt
+
+The app was not doing its job: planning ceremony and an AI companion were in the
+way of the thing it exists for, which is showing whether the day was executed.
+Everything below is a deliberate departure from `docs/spec.md`, which still
+describes the old design.
+
+- **All AI features deleted.** Chat, the tool-use agent, action cards, morning
+  briefings and evening wrap-ups, weekly-review conversations, the onboarding
+  interview, the AI memory table, and the improvement-area photo commentary.
+  Gone from the schema (`conversations`, `messages`, `proposed_actions`,
+  `briefings`, `memories`, `user_profile`, `interview_sessions`,
+  `settings.ai_overrides`, `area_checkins.ai_*`), from the API (`/ai/**`,
+  `/memories`), and from the app (`Features/Chat`, `Features/Reviews`,
+  `MemoryView`, the SSE client). The `openai` dependency is no longer used.
+- **The 12 Week Year layer deleted.** Vision, blocks, tactics, tactic
+  completions, weekly reviews, the Plan tab and the setup wizard. The daily
+  score is now simply tasks + habits + feel on every day — `isReviewWeek` is
+  gone from the engine, from `daily_scores`, and from the Today payload, and
+  week 13 no longer pauses tasks. Trends always computes calendar-week
+  averages, which it already had as a fallback.
+- **Goals rebuilt around a deadline instead of a block.** The old `goals` table
+  (block-scoped, progress derived from tactics) is dropped and replaced. A goal
+  now carries a horizon (short/long), a start and target date, and optionally a
+  numeric range (`start_value` → `target_value` with a unit) plus a milestone
+  checklist. Progress is the numeric fraction when a range is set, else the
+  fraction of milestones done, else absent. It is always shown against
+  *time* progress — the gap between the two bars is the entire point of the
+  tab. Numeric progress is measured from the baseline so a downward goal
+  (92 → 80 kg) reads identically to an upward one.
+- **Tasks and habits no longer link to a goal.** `goal_id` is dropped from
+  `tasks`, `habits`, and `recurrence_templates`, and the goal pickers are gone
+  from the task editor, task detail, and recurring-task editor. Goals are what
+  you're aiming at; tasks and habits are what you did today. Tying them made
+  every task-creation flow ask a question the user didn't want to answer.
+- **Today pages back three days.** A horizontal pager covers today and the
+  three days behind it, with a segmented strip above it (each day's score) so
+  the gesture is discoverable. Every page can set its feel score and log or
+  unlog habits; tasks are read-only on past days, since those days are already
+  scored and back-dating a completion rewrites history rather than recording
+  it. This replaces the old "yesterday's feel?" backfill row, which only
+  covered one day and only before noon.
+- **Optimistic habit updates no longer flicker.** Two taps in quick succession
+  showed both reps, then dropped one, then brought it back. Two races caused
+  it: `onLanded` scheduled a revalidation as soon as the *first* write landed,
+  while the second was still in flight, and a `GET` already in flight when a
+  tap happened would overwrite the optimistic state with a response that
+  predated it. Fixed with `AppModel.writeTicket` — every local write bumps it,
+  every store captures it before fetching and discards a response if it moved —
+  and by holding revalidation until the outbox has actually drained (bounded,
+  so an offline queue can't wedge it). Habit stats no longer blank out on
+  mutation either; the stale value stays until its replacement arrives.

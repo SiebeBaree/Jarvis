@@ -7,9 +7,6 @@ struct ModelsTests {
         let json = """
         {
           "dayKey": "2026-07-10",
-          "weekNumber": null,
-          "isReviewWeek": false,
-          "block": null,
           "score": {
             "dayKey": "2026-07-10",
             "total": 75.5,
@@ -17,7 +14,6 @@ struct ModelsTests {
             "habitPoints": 32,
             "feelPoints": null,
             "applicableWeight": 80,
-            "isReviewWeek": false,
             "isFinal": false,
             "breakdown": {
               "tasks": [{ "taskId": "a", "credit": 0.5, "late": false }],
@@ -27,14 +23,13 @@ struct ModelsTests {
           "tasksDue": [],
           "overdueTasks": [],
           "habits": [],
-          "mood": null,
-          "yesterdayMoodMissing": true
+          "mood": null
         }
         """
         let payload = try JSONDecoder().decode(DayPayload.self, from: Data(json.utf8))
         #expect(payload.score.total == 75.5)
         #expect(payload.score.feelPoints == nil)
-        #expect(payload.yesterdayMoodMissing)
+        #expect(payload.dayKey == "2026-07-10")
     }
 
     @Test func encodesExplicitNullInPatch() throws {

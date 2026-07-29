@@ -47,7 +47,6 @@ final class TasksStore {
     private(set) var state: LoadState<[TaskDTO]> = .idle
     /// Open tasks without a due date (view "inbox"), merged into Upcoming.
     private(set) var noDateTasks: [TaskDTO] = []
-    private(set) var goals: [GoalDTO] = []
     private(set) var categories: [TaskCategoryDTO] = []
     /// Every task seen in any fetch, so the detail screen can start instantly.
     private(set) var cache: [String: TaskDTO] = [:]
@@ -58,11 +57,6 @@ final class TasksStore {
 
     var todayKey: String {
         DayKeyMath.todayKey(boundaryHour: model?.settings?.dayBoundaryHour ?? 3)
-    }
-
-    func goalTitle(for goalId: String?) -> String? {
-        guard let goalId else { return nil }
-        return goals.first { $0.id == goalId }?.title
     }
 
     func category(for categoryId: String?) -> TaskCategoryDTO? {
@@ -137,18 +131,6 @@ final class TasksStore {
             model.handle(error)
             // Keep whatever is on screen; only a first, empty load can fail.
             if state.value == nil { state = .failed(TodayStore.message(for: error)) }
-        }
-    }
-
-    func fetchGoals() async {
-        guard let model else { return }
-        if let cached = model.store.read([GoalDTO].self, .goals) {
-            goals = cached.value
-            if cached.isFresh { return }
-        }
-        if let response = try? await model.api.goals() {
-            goals = response.goals
-            model.store.write(response.goals, .goals)
         }
     }
 
@@ -382,7 +364,6 @@ final class TasksStore {
             dueDate: request.dueDate,
             dueTime: request.dueTime,
             priority: request.priority ?? .medium,
-            goalId: request.goalId,
             categoryId: request.categoryId,
             parentTaskId: request.parentTaskId,
         )

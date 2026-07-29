@@ -71,88 +71,81 @@ export const areaPatchSchema = areaCreateSchema.partial().extend({
   archived: z.boolean().optional(),
 });
 
-// ---------- vision ----------
-export const visionPutSchema = z.object({
-  content: z.string().max(20_000),
-});
-
-// ---------- blocks ----------
-export const blockCreateSchema = z.object({
-  title: z.string().min(1).max(200),
-  startDate: dayKeySchema,
-});
-export const blockPatchSchema = z
-  .object({
-    title: z.string().min(1).max(200).optional(),
-    startDate: dayKeySchema.optional(), // snapped to a Monday; endDate follows from it
-  })
-  .strict();
-
 // ---------- goals ----------
-export const goalCreateSchema = z.object({
+const goalValueSchema = z.number().min(-1e11).max(1e11);
+
+const goalBaseSchema = z.object({
+  id: z.string().uuid().optional(), // client-chosen so a replayed create is idempotent
   title: z.string().min(1).max(200),
-  description: z.string().max(2000).nullish(),
+  description: z.string().max(4000).nullish(),
+  horizon: z.enum(["short", "long"]).optional(),
   areaId: z.string().uuid().nullish(),
-  blockId: z.string().uuid().nullish(),
-  trackStatus: z.enum(["on_track", "at_risk", "done"]).nullish(),
-  manualProgress: z.number().int().min(0).max(100).nullish(), // null clears back to computed
+  startDate: dayKeySchema.optional(), // defaults to today
+  targetDate: dayKeySchema,
+  // Send all three (or none). A partial numeric setup has no meaningful
+  // percentage, so it is rejected rather than silently rendered as untracked.
+  unit: z.string().min(1).max(20).nullish(),
+  startValue: goalValueSchema.nullish(),
+  targetValue: goalValueSchema.nullish(),
+  currentValue: goalValueSchema.nullish(),
   sortOrder: z.number().int().optional(),
 });
-export const goalPatchSchema = goalCreateSchema.partial().extend({
-  status: z.enum(["active", "achieved", "dropped"]).optional(),
-});
+
+/** startValue/targetValue travel together, and a flat target has no progress. */
+function refineNumericTracking(
+  goal: {
+    startValue?: number | null;
+    targetValue?: number | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const hasStart = goal.startValue !== null && goal.startValue !== undefined;
+  const hasTarget = goal.targetValue !== null && goal.targetValue !== undefined;
+  if (hasStart !== hasTarget) {
+    ctx.addIssue({
+      code: "custom",
+      message: "startValue and targetValue must be set together",
+    });
+    return;
+  }
+  if (hasStart && goal.startValue === goal.targetValue) {
+    ctx.addIssue({ code: "custom", message: "targetValue must differ from startValue" });
+  }
+}
+
+export const goalCreateSchema = goalBaseSchema
+  .refine((g) => !g.startDate || g.startDate <= g.targetDate, {
+    message: "targetDate must be on or after startDate",
+  })
+  .superRefine(refineNumericTracking);
+
+export const goalPatchSchema = goalBaseSchema
+  .omit({ id: true })
+  .partial()
+  .extend({ status: z.enum(["active", "achieved", "dropped"]).optional() })
+  .strict()
+  .refine((g) => !g.startDate || !g.targetDate || g.startDate <= g.targetDate, {
+    message: "targetDate must be on or after startDate",
+  })
+  .superRefine(refineNumericTracking);
+
 export const goalListQuerySchema = z.object({
-  includeDropped: z.enum(["true", "false"]).optional(),
-  blockId: z.string().uuid().optional(),
+  includeClosed: z.enum(["true", "false"]).optional(),
 });
 
-// ---------- tactics ----------
-const tacticWeekSchema = z.number().int().min(1).max(12);
-export const tacticCreateSchema = z
-  .object({
-    goalId: z.string().uuid(),
-    title: z.string().min(1).max(300),
-    fromWeek: tacticWeekSchema.default(1),
-    toWeek: tacticWeekSchema.default(12),
-    sortOrder: z.number().int().optional(),
-  })
-  .refine((t) => t.fromWeek <= t.toWeek, { message: "fromWeek must be <= toWeek" });
-export const tacticPatchSchema = z
-  .object({
-    title: z.string().min(1).max(300).optional(),
-    fromWeek: tacticWeekSchema.optional(),
-    toWeek: tacticWeekSchema.optional(),
-    sortOrder: z.number().int().optional(),
-  })
-  .strict();
-export const tacticListQuerySchema = z
-  .object({
-    goalId: z.string().uuid().optional(),
-    blockId: z.string().uuid().optional(),
-  })
-  .refine((q) => Boolean(q.goalId) !== Boolean(q.blockId), {
-    message: "provide exactly one of goalId or blockId",
-  });
-export const tacticWeekPutSchema = z.object({ done: z.boolean() });
+/** The one-tap "log where I am now" write from the goal card. */
+export const goalValuePutSchema = z.object({ currentValue: goalValueSchema });
 
-// ---------- AI memory ----------
-export const memoryCategories = [
-  "identity",
-  "work",
-  "health",
-  "appearance",
-  "preferences",
-  "relationships",
-  "context",
-] as const;
-export const memoryCreateSchema = z.object({
-  category: z.enum(memoryCategories),
-  content: z.string().min(1).max(500),
+export const milestoneCreateSchema = z.object({
+  id: z.string().uuid().optional(), // client-chosen so a replayed create is idempotent
+  title: z.string().min(1).max(200),
+  sortOrder: z.number().int().optional(),
 });
-export const memoryPatchSchema = z
+export const milestonePatchSchema = z
   .object({
-    category: z.enum(memoryCategories).optional(),
-    content: z.string().min(1).max(500).optional(),
+    title: z.string().min(1).max(200).optional(),
+    done: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
   })
   .strict();
 
@@ -199,7 +192,6 @@ export const taskCreateSchema = z.object({
   dueDate: dayKeySchema.nullish(),
   dueTime: timeSchema.nullish(),
   priority: prioritySchema.optional(),
-  goalId: z.string().uuid().nullish(),
   categoryId: z.string().uuid().nullish(),
   parentTaskId: z.string().uuid().nullish(),
   sortOrder: z.number().int().optional(),
@@ -212,7 +204,6 @@ export const taskPatchSchema = z
     dueDate: dayKeySchema.nullable().optional(),
     dueTime: timeSchema.nullable().optional(),
     priority: prioritySchema.optional(),
-    goalId: z.string().uuid().nullable().optional(),
     categoryId: z.string().uuid().nullable().optional(),
     sortOrder: z.number().int().optional(),
     status: z.enum(["open", "cancelled"]).optional(), // done goes through /complete
@@ -223,7 +214,6 @@ export const taskListQuerySchema = z.object({
   view: z.enum(["today", "upcoming", "all", "done", "inbox"]).optional(),
   dueFrom: dayKeySchema.optional(),
   dueTo: dayKeySchema.optional(),
-  goalId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   status: z.enum(["open", "done", "cancelled"]).optional(),
 });
@@ -247,13 +237,11 @@ export const templateCreateSchema = z.object({
   title: z.string().min(1).max(300),
   notes: z.string().max(5000).nullish(),
   priority: prioritySchema.optional(),
-  goalId: z.string().uuid().nullish(),
   categoryId: z.string().uuid().nullish(),
   dueTime: timeSchema.nullish(),
   rule: recurrenceRuleSchema,
   startDate: dayKeySchema,
   endDate: dayKeySchema.nullish(),
-  showInReviewWeek: z.boolean().optional(),
 });
 export const templatePatchSchema = templateCreateSchema.partial().extend({
   paused: z.boolean().optional(),
@@ -272,7 +260,6 @@ export const habitCreateSchema = z
     targetReps: z.number().int().min(1).max(20).optional(),
     plannedDays: z.array(z.number().int().min(1).max(7)).max(7).optional(),
     areaId: z.string().uuid().nullish(),
-    goalId: z.string().uuid().nullish(),
     startDate: dayKeySchema.optional(), // defaults to today
     sortOrder: z.number().int().optional(),
   })
@@ -298,7 +285,6 @@ export const habitPatchSchema = z
     targetReps: z.number().int().min(1).max(20).optional(),
     plannedDays: z.array(z.number().int().min(1).max(7)).max(7).optional(),
     areaId: z.string().uuid().nullable().optional(),
-    goalId: z.string().uuid().nullable().optional(),
     paused: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
   })
@@ -324,15 +310,6 @@ export const scoresQuerySchema = z.object({
   from: dayKeySchema,
   to: dayKeySchema,
 });
-export const weeklyScoresQuerySchema = z.object({
-  blockId: z.string().uuid(),
-});
-
-// ---------- reviews ----------
-export const weeklyReviewStartSchema = z.object({
-  weekNumber: z.number().int().min(1).max(13).optional(),
-});
-
 // ---------- body metrics ----------
 export const metricTypeCreateSchema = z.object({
   name: z.string().min(1).max(60),
@@ -365,13 +342,4 @@ export const photosQuerySchema = z.object({
 export const photoUploadQuerySchema = z.object({
   angle: z.string().min(1).max(30),
   dayKey: dayKeySchema,
-});
-
-// ---------- AI chat ----------
-export const chatRequestSchema = z.object({
-  conversationId: z.string().uuid().nullish(),
-  message: z.string().min(1).max(8000),
-  // Kind for a NEW conversation (ignored when conversationId is set).
-  // "seeding" = the plan-free get-to-know-you conversation from the setup wizard.
-  kind: z.enum(["chat", "seeding"]).optional(),
 });

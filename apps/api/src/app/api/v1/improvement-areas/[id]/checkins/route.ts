@@ -1,14 +1,11 @@
 // Weekly photo check-ins for one improvement area. POST takes raw image bytes
 // (query carries dayKey); one check-in per ISO week — re-uploading within the
-// same week replaces the photo and clears the commentary. AI commentary is
-// generated asynchronously via next/server `after()`.
+// same week replaces that week's photo.
 
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { areaCheckins, improvementAreas } from "@/db/schema";
-import { generateCheckinCommentary } from "@/lib/ai/checkin-commentary";
 import { requireAuth } from "@/lib/auth";
 import { weekKeyFor } from "@/lib/checkins";
 import { ApiError, handler, parseQuery } from "@/lib/http";
@@ -16,7 +13,7 @@ import { todayKey } from "@/lib/scoring/snapshot";
 import { checkinUploadQuerySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
-export const maxDuration = 120; // upload + async commentary kickoff
+export const maxDuration = 120; // image upload to blob storage
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -53,8 +50,6 @@ function checkinDTO(row: typeof areaCheckins.$inferSelect, url: string) {
     weekKey: row.weekKey,
     dayKey: row.dayKey,
     url,
-    aiCommentary: row.aiCommentary,
-    aiGeneratedAt: row.aiGeneratedAt,
     createdAt: row.createdAt,
   };
 }
@@ -140,7 +135,7 @@ export const POST = handler(async (request: Request, { params }: Params) => {
 
   let saved: typeof areaCheckins.$inferSelect;
   if (existing) {
-    // Same week: replace the photo, restart the commentary.
+    // Same week: replace the photo.
     const [updated] = await db
       .update(areaCheckins)
       .set({
@@ -149,9 +144,6 @@ export const POST = handler(async (request: Request, { params }: Params) => {
         blobUrl: result.url,
         contentType,
         sizeBytes: bytes.byteLength,
-        aiCommentary: null,
-        aiModel: null,
-        aiGeneratedAt: null,
         createdAt: new Date(),
       })
       .where(eq(areaCheckins.id, existing.id))
@@ -179,9 +171,6 @@ export const POST = handler(async (request: Request, { params }: Params) => {
     if (!created) throw new ApiError(500, "internal_error", "Could not save check-in");
     saved = created;
   }
-
-  const { userId, settings } = ctx;
-  after(() => generateCheckinCommentary(userId, saved.id, settings.aiOverrides));
 
   const token = await issueSignedToken({
     pathname: saved.blobKey,

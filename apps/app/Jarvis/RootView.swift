@@ -22,8 +22,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case today
     case tasks
     case habits
-    case plan
-    case chat
+    case goals
     case trends
     case metrics
     case improve
@@ -31,12 +30,12 @@ enum AppSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// iPhone tab bar (Trends/Metrics/Improve live behind Today's toolbar there).
-    static let tabSections: [AppSection] = [.today, .tasks, .habits, .plan, .chat]
+    static let tabSections: [AppSection] = [.today, .tasks, .habits, .goals]
 
     /// macOS sidebar shows everything, grouped.
     static let sidebarGroups: [(title: String?, sections: [AppSection])] = [
-        (nil, [.today, .chat]),
-        ("Plan", [.plan]),
+        (nil, [.today]),
+        ("Aim", [.goals]),
         ("Track", [.tasks, .habits]),
         ("Progress", [.trends, .improve, .metrics]),
     ]
@@ -46,8 +45,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .today: "Today"
         case .tasks: "Tasks"
         case .habits: "Habits"
-        case .plan: "Plan"
-        case .chat: "Chat"
+        case .goals: "Goals"
         case .trends: "Trends"
         case .metrics: "Metrics"
         case .improve: "Improve"
@@ -59,11 +57,10 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .today: "sun.max"
         case .tasks: "checklist"
         case .habits: "repeat"
-        case .plan: "map"
-        case .chat: "bubble.left.and.text.bubble.right"
+        case .goals: "target"
         case .trends: "chart.line.uptrend.xyaxis"
         case .metrics: "scalemass"
-        case .improve: "sparkles"
+        case .improve: "figure.stand"
         }
     }
 }
@@ -71,7 +68,6 @@ enum AppSection: String, CaseIterable, Identifiable {
 struct MainShell: View {
     @Environment(AppModel.self) private var model
     @State private var selection: AppSection = .today
-    @State private var showFirstRunOnboarding = false
 
     var body: some View {
         shell
@@ -82,21 +78,6 @@ struct MainShell: View {
                     model.requestedSection = nil
                 }
             }
-            .task {
-                // First run: fresh account → the manual setup wizard.
-                if model.needsFirstRunOnboarding {
-                    model.needsFirstRunOnboarding = false
-                    showFirstRunOnboarding = true
-                }
-            }
-            .onChange(of: model.needsFirstRunOnboarding) { _, needed in
-                // Re-triggered after an account reset from Settings.
-                if needed {
-                    model.needsFirstRunOnboarding = false
-                    showFirstRunOnboarding = true
-                }
-            }
-            .setupWizardCover(isPresented: $showFirstRunOnboarding)
     }
 
     @ViewBuilder
@@ -107,7 +88,7 @@ struct MainShell: View {
                 ForEach(Array(AppSection.sidebarGroups.enumerated()), id: \.offset) { _, group in
                     Section {
                         ForEach(group.sections) { section in
-                            Label(sidebarTitle(for: section), systemImage: section.icon)
+                            Label(section.title, systemImage: section.icon)
                                 .tag(section)
                         }
                     } header: {
@@ -131,7 +112,6 @@ struct MainShell: View {
         }
         .background(Color.bgCanvas)
         .background(sectionShortcuts)
-        .chatSlideOver() // ⇧⌘J panel, available from every screen
         #else
         TabView(selection: $selection) {
             ForEach(AppSection.tabSections) { section in
@@ -146,28 +126,19 @@ struct MainShell: View {
     }
 
     #if os(macOS)
-    /// "Plan · Week 7" / "Plan · Review Week" — live from the today payload.
-    private func sidebarTitle(for section: AppSection) -> String {
-        guard section == .plan else { return section.title }
-        if model.planContext.isReviewWeek { return "Plan · Review Week" }
-        if let week = model.planContext.weekNumber { return "Plan · Week \(week)" }
-        return section.title
-    }
-
     private var settingsFooter: some View {
         SidebarSettingsRow()
             .padding(.horizontal, Space.sm)
             .padding(.bottom, Space.sm)
     }
 
-    /// ⌘1–⌘5 jump to the main sections (spec §B1).
+    /// ⌘1–⌘4 jump to the main sections.
     private var sectionShortcuts: some View {
         Group {
             shortcutButton(.today, "1")
-            shortcutButton(.chat, "2")
-            shortcutButton(.plan, "3")
-            shortcutButton(.tasks, "4")
-            shortcutButton(.habits, "5")
+            shortcutButton(.tasks, "2")
+            shortcutButton(.habits, "3")
+            shortcutButton(.goals, "4")
         }
         .hidden()
     }
@@ -184,8 +155,7 @@ struct MainShell: View {
         case .today: TodayView()
         case .tasks: TasksView()
         case .habits: HabitsView()
-        case .plan: PlanView()
-        case .chat: ChatView()
+        case .goals: GoalsView()
         case .trends: TrendsView()
         case .metrics:
             MetricsView()

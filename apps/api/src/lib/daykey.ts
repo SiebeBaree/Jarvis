@@ -74,12 +74,3 @@ export function elapsedDayOfWeek(dayKey: DayKey): number {
   return isoWeekday(dayKey);
 }
 
-/** 1-based week number within a block (week 13 = review week). */
-export function weekIndexInBlock(dayKey: DayKey, blockStartDate: DayKey): number {
-  return Math.floor(diffDays(blockStartDate, dayKey) / 7) + 1;
-}
-
-export function isReviewWeek(dayKey: DayKey, blockStartDate: DayKey, blockEndDate: DayKey): boolean {
-  if (dayKey < blockStartDate || dayKey > blockEndDate) return false;
-  return weekIndexInBlock(dayKey, blockStartDate) === 13;
-}

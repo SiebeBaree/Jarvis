@@ -193,27 +193,6 @@ struct ImprovementAreaDetailView: View {
             .contentShape(Rectangle())
             .onTapGesture { fullscreenCheckin = checkin }
 
-            if let commentary = checkin.aiCommentary {
-                HStack(alignment: .top, spacing: Space.md) {
-                    Circle()
-                        .fill(Color.accentPrimary)
-                        .frame(width: 16, height: 16)
-                        .padding(.top, 2)
-                        .accessibilityHidden(true)
-                    Text(commentary)
-                        .font(.bodyJ)
-                        .foregroundStyle(Color.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-            } else {
-                HStack(spacing: Space.sm) {
-                    ProgressView().controlSize(.mini)
-                    Text("J.A.R.V.I.S. is looking at this — pull to refresh in a moment")
-                        .font(.captionJ)
-                        .foregroundStyle(Color.textTertiary)
-                }
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()

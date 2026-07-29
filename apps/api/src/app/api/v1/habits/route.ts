@@ -42,7 +42,6 @@ export const POST = handler(async (request: Request) => {
       targetReps: body.targetReps ?? DEFAULT_TARGET_REPS[body.type],
       plannedDays: body.plannedDays ?? [],
       areaId: body.areaId ?? null,
-      goalId: body.goalId ?? null,
       startDate: body.startDate ?? today,
       sortOrder: body.sortOrder ?? 0,
     })

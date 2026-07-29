@@ -2,46 +2,26 @@ import DesignSystem
 import JarvisAPI
 import SwiftUI
 
-/// The Today screen (§B3, Stage 1): score header, mood card, overdue,
-/// tasks, and habits. Briefing card, week chip, and evening wrap-up are
-/// later stages and slot in above/below these sections.
+/// The Today screen: score header, feel score, tasks, habits — for today and
+/// the three days behind it.
+///
+/// The back-days are the point of the horizontal pager: the day you forgot to
+/// rate is still there tomorrow, so a missed evening doesn't turn into a
+/// permanent hole in the record. Past pages are read-only for tasks (they are
+/// already scored) but fully editable for the feel score and habit reps.
 struct TodayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var store = TodayStore()
+    @State private var selectedDay: DayKey?
     @State private var showSettings = false
     @State private var showBreakdown = false
-    @State private var showCompleted = false
-    @State private var isAddingTask = false
-    @State private var newTaskTitle = ""
-    @State private var quickDueChoice: QuickDueChoice = .today
-    @State private var quickPriority: TaskPriority = .medium
-    @State private var quickCategories: [TaskCategoryDTO] = []
-    @State private var quickCategoryId: String?
-    @State private var showQuickEditor = false
-    @State private var quickEditorGoals: [GoalDTO] = []
-    @State private var detailRoute: HabitDetailRoute?
-    @State private var showPlanOnboarding = false
-    @FocusState private var addTaskFocused: Bool
-
-    /// Due-date choice for the quick-add composer chips.
-    private enum QuickDueChoice {
-        case today, tomorrow, none
-
-        var label: String {
-            switch self {
-            case .today: "Today"
-            case .tomorrow: "Tomorrow"
-            case .none: "No date"
-            }
-        }
-    }
 
     var body: some View {
         Group {
-            if let payload = store.payload {
-                content(payload)
+            if store.payload != nil {
+                pager
             } else if case .failed(let message) = store.day {
                 errorState(message)
             } else {
@@ -68,7 +48,7 @@ struct TodayView: View {
                 NavigationLink {
                     ImproveView()
                 } label: {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "figure.stand")
                 }
                 .accessibilityLabel("Improve")
             }
@@ -89,74 +69,155 @@ struct TodayView: View {
                 #endif
         }
         .sheet(isPresented: $showBreakdown) {
-            if let payload = store.payload {
+            if let payload = visiblePayload {
                 ScoreBreakdownSheet(payload: payload)
             }
         }
-        .sheet(isPresented: $showQuickEditor) {
-            TaskEditorView(
-                goals: quickEditorGoals,
-                defaultDueDate: store.payload?.dayKey ?? DayKeyMath.todayKey(),
-                initialTitle: newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-            ) { request in
-                store.createTask(request)
-                newTaskTitle = ""
-                isAddingTask = false
-            }
-        }
-        .navigationDestination(item: $detailRoute) { route in
-            HabitDetailView(
-                habitId: route.habitId,
-                preloaded: store.payload?.habits.first(where: { $0.habit.id == route.habitId })?.habit,
-            )
-        }
-        .setupWizardCover(isPresented: $showPlanOnboarding)
         .task {
             store.configure(model)
             await store.load()
         }
         .onChange(of: model.dataRevision) {
-            Task { await store.load() }
+            Task {
+                await store.load()
+                // Past pages are memory-only, so a landed write has to push
+                // them explicitly or they keep showing pre-write numbers.
+                for dayKey in store.reachableDayKeys.dropFirst() where store.payload(for: dayKey) != nil {
+                    await store.loadPast(dayKey, force: true)
+                }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await store.load() }
             }
         }
+        .onChange(of: store.payload?.dayKey) { _, today in
+            // Midnight rollover (or first load) — snap back to today.
+            if let today { selectedDay = today }
+        }
     }
 
-    // MARK: - Content
+    // MARK: - Day pager
 
-    private func content(_ payload: DayPayload) -> some View {
+    private var visibleDayKey: DayKey? {
+        selectedDay ?? store.payload?.dayKey
+    }
+
+    private var visiblePayload: DayPayload? {
+        visibleDayKey.flatMap { store.payload(for: $0) }
+    }
+
+    private var pager: some View {
+        VStack(spacing: 0) {
+            dayPicker
+            TabView(selection: Binding(get: { visibleDayKey ?? "" }, set: { selectedDay = $0 })) {
+                ForEach(store.reachableDayKeys, id: \.self) { dayKey in
+                    dayPage(dayKey)
+                        .tag(dayKey)
+                }
+            }
+            #if os(iOS)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            #endif
+        }
+        .onChange(of: visibleDayKey) { _, dayKey in
+            guard let dayKey else { return }
+            Task { await store.loadPast(dayKey) }
+        }
+    }
+
+    /// Segmented day strip above the pages. It doubles as the affordance —
+    /// a horizontal swipe is invisible until something tells you it exists.
+    private var dayPicker: some View {
+        HStack(spacing: Space.xs) {
+            ForEach(store.reachableDayKeys.reversed(), id: \.self) { dayKey in
+                let isSelected = dayKey == visibleDayKey
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { selectedDay = dayKey }
+                } label: {
+                    VStack(spacing: 1) {
+                        Text(dayLabel(dayKey))
+                            .font(.captionJ)
+                        Text(scoreLabel(dayKey))
+                            .font(.monoJ)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(isSelected ? Color.textPrimary : Color.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Space.xs)
+                    .background(
+                        isSelected ? Color.bgSurface : Color.clear,
+                        in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous),
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+                            .strokeBorder(isSelected ? Color.borderHairline : .clear, lineWidth: 0.5),
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(dayLabel(dayKey)), score \(scoreLabel(dayKey))")
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(.horizontal, PageMargin.standard)
+        .padding(.bottom, Space.xs)
+    }
+
+    private func dayLabel(_ dayKey: DayKey) -> String {
+        guard let today = store.payload?.dayKey else { return dayKey }
+        let label = DayKeyMath.relativeLabel(for: dayKey, today: today)
+        // Weekday names are too wide for a four-up strip on an iPhone.
+        return label.count > 9 ? String(label.prefix(3)) : label
+    }
+
+    private func scoreLabel(_ dayKey: DayKey) -> String {
+        guard let total = store.payload(for: dayKey)?.score.total else { return "—" }
+        return "\(Int(total.rounded()))"
+    }
+
+    // MARK: - One day
+
+    @ViewBuilder
+    private func dayPage(_ dayKey: DayKey) -> some View {
+        let isToday = dayKey == store.payload?.dayKey
+        switch store.state(for: dayKey) {
+        case .loaded(let payload):
+            dayContent(payload, isToday: isToday)
+        case .failed(let message):
+            errorState(message)
+        default:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func dayContent(_ payload: DayPayload, isToday: Bool) -> some View {
         List {
             Group {
-                dateHeader(payload)
-                if let error = store.mutationError {
+                dateHeader(payload, isToday: isToday)
+                if let error = store.mutationError, isToday {
                     errorBanner(error)
                 }
-                if payload.block == nil {
-                    if let upcoming = payload.upcomingBlock {
-                        upcomingBlockBanner(upcoming)
-                    } else {
-                        planSetupBanner
-                    }
-                }
                 scoreHeader(payload)
-                moodSection(payload)
-                CheckinPromptCard() // weekly improvement-area photo prompt
-                WeeklyReviewSlot(payload: payload) // Stage 4: weekly review banner
-                WrapupSlot(payload: payload) // Stage 3: evening wrap-up banner
+                MoodCard(
+                    dayKey: payload.dayKey,
+                    mood: payload.mood,
+                    isToday: isToday,
+                    onCommit: { store.setMood($0, on: payload.dayKey) },
+                )
+                if isToday {
+                    CheckinPromptCard() // weekly improvement-area photo prompt
+                }
                 // Every task/habit ForEach below sits at a FIXED position in
                 // this builder (empty collections render nothing) — wrapping
                 // one in an `if` makes List fall back to structural row
                 // identity, and completing a row then animates its neighbour
                 // out instead of the row itself.
                 overdueSection(payload)
-                if payload.isReviewWeek {
-                    reviewWeekTasksNote(payload)
-                }
-                tasksSection(payload)
-                habitsSection(payload)
+                tasksSection(payload, isToday: isToday)
+                habitsSection(payload, isToday: isToday)
             }
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -171,7 +232,13 @@ struct TodayView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .refreshable { await store.load(force: true) }
+        .refreshable {
+            if isToday {
+                await store.load(force: true)
+            } else {
+                await store.loadPast(payload.dayKey, force: true)
+            }
+        }
     }
 
     private func errorState(_ message: String) -> some View {
@@ -181,7 +248,7 @@ struct TodayView: View {
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
             Button("Retry") {
-                Task { await store.load() }
+                Task { await store.load(force: true) }
             }
             .buttonStyle(.jarvisSecondary)
         }
@@ -198,7 +265,7 @@ struct TodayView: View {
             Spacer(minLength: Space.sm)
             Button("Retry") {
                 store.mutationError = nil
-                Task { await store.load() }
+                Task { await store.load(force: true) }
             }
             .buttonStyle(.plain)
             .font(.subheadJ)
@@ -210,32 +277,20 @@ struct TodayView: View {
 
     // MARK: - Date header
 
-    private func dateHeader(_ payload: DayPayload) -> some View {
+    private func dateHeader(_ payload: DayPayload, isToday: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(DayKeyMath.longLabel(for: payload.dayKey))
                 .font(.subheadJ)
                 .foregroundStyle(Color.textSecondary)
-            if DayKeyMath.isLateNight() {
+            if isToday, DayKeyMath.isLateNight() {
                 Text("Late night — still counts for \(weekdayName(payload.dayKey))")
                     .font(.captionJ)
                     .foregroundStyle(Color.textTertiary)
             }
-            if let block = payload.block, let weekNumber = payload.weekNumber {
-                Button {
-                    model.requestedSection = .plan
-                } label: {
-                    Text(payload.isReviewWeek
-                        ? "Review Week · \(block.title)"
-                        : "Week \(weekNumber) · \(block.title)")
-                        .font(.captionJ)
-                        .foregroundStyle(payload.isReviewWeek ? Color.accentPrimary : Color.textSecondary)
-                        .padding(.horizontal, Space.sm)
-                        .padding(.vertical, 3)
-                        .background(payload.isReviewWeek ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, Space.xs)
-                .accessibilityHint(Text("Opens the Plan tab"))
+            if !isToday {
+                Text("Catching up — the feel score and habits are still editable.")
+                    .font(.captionJ)
+                    .foregroundStyle(Color.textTertiary)
             }
         }
     }
@@ -243,61 +298,6 @@ struct TodayView: View {
     private func weekdayName(_ dayKey: String) -> String {
         guard let date = DayKeyMath.date(from: dayKey) else { return "today" }
         return date.formatted(.dateTime.weekday(.wide))
-    }
-
-    // MARK: - Plan setup banner
-
-    /// Shown while no 12-week block exists — routes into the setup wizard.
-    private var planSetupBanner: some View {
-        VStack(alignment: .leading, spacing: Space.sm) {
-            Text("Set up your 12-week plan")
-                .font(.headlineJ)
-                .foregroundStyle(Color.textPrimary)
-            Text("You write the goals and habits — Jarvis tracks the execution.")
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
-            Button("Set up your plan") {
-                showPlanOnboarding = true
-            }
-            .buttonStyle(.jarvisPrimary)
-            .padding(.top, Space.xs)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .jarvisCard()
-    }
-
-    /// A block exists but hasn't started yet — no setup nagging.
-    private func upcomingBlockBanner(_ block: BlockSummaryDTO) -> some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            Text("\"\(block.title)\" starts \(HabitDisplay.shortLabel(for: block.startDate))")
-                .font(.headlineJ)
-                .foregroundStyle(Color.textPrimary)
-            Text("Your plan is ready. Habits and mood score every day; block tasks and tactics begin with week 1.")
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .jarvisCard()
-    }
-
-    // MARK: - Review week (tasks paused)
-
-    private func reviewWeekTasksNote(_ payload: DayPayload) -> some View {
-        let hidden = payload.pausedTaskCount ?? 0
-        return VStack(alignment: .leading, spacing: Space.xs) {
-            Text("Review week — tasks are paused")
-                .font(.headlineJ)
-                .foregroundStyle(Color.textPrimary)
-            Text(
-                hidden > 0
-                    ? "\(hidden) scheduled task\(hidden == 1 ? "" : "s") hidden until the next block. Habits and mood keep scoring."
-                    : "Habits and mood keep scoring. Use this week to close out the block.",
-            )
-            .font(.subheadJ)
-            .foregroundStyle(Color.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .jarvisCard()
     }
 
     // MARK: - Score header
@@ -363,23 +363,6 @@ struct TodayView: View {
         return rounded == rounded.rounded() ? "\(Int(rounded))" : String(format: "%.1f", rounded)
     }
 
-    // MARK: - Mood
-
-    @ViewBuilder
-    private func moodSection(_ payload: DayPayload) -> some View {
-        MoodCard(mood: payload.mood) { value in
-            store.setMood(value)
-        }
-        if payload.yesterdayMoodMissing,
-           !store.backfillSkipped,
-           Calendar.current.component(.hour, from: .now) < 12 {
-            MoodBackfillRow(
-                onCommit: { value in store.setYesterdayMood(value) },
-                onSkip: { store.backfillSkipped = true },
-            )
-        }
-    }
-
     // MARK: - Overdue
 
     @ViewBuilder
@@ -441,219 +424,56 @@ struct TodayView: View {
     }
 
     @ViewBuilder
-    private func tasksSection(_ payload: DayPayload) -> some View {
+    private func tasksSection(_ payload: DayPayload, isToday: Bool) -> some View {
         let open = sortedOpenTasks(payload)
         let completed = payload.tasksDue.filter { $0.status == .done }
-        // Review week pauses tasks entirely unless something is scheduled anyway.
-        let hidden = payload.isReviewWeek && payload.tasksDue.isEmpty
 
-        if !hidden {
-            SectionHeader(payload.isReviewWeek ? "Scheduled anyway" : "Tasks")
-                .padding(.top, Space.sm)
+        SectionHeader("Tasks")
+            .padding(.top, Space.sm)
 
-            if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
-                if payload.habits.isEmpty {
-                    heroEmptyState
-                } else {
-                    Text("Nothing scheduled today")
-                        .font(.bodyJ)
-                        .foregroundStyle(Color.textTertiary)
-                }
+        if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
+            if payload.habits.isEmpty, isToday {
+                heroEmptyState
+            } else {
+                Text(isToday ? "Nothing scheduled today" : "Nothing was scheduled")
+                    .font(.bodyJ)
+                    .foregroundStyle(Color.textTertiary)
             }
         }
 
+        // Past days are read-only for tasks: they have already been scored,
+        // and back-dating completions would rewrite history rather than
+        // record it.
         ForEach(open) { task in
             TaskRow(
                 task: task,
-                onToggle: { store.completeTask(task) },
+                onToggle: { if isToday { store.completeTask(task) } },
                 onTap: {},
             )
-            .swipeActions(edge: .trailing) {
-                Button("Complete") { store.completeTask(task) }
-                    .tint(.success)
+            .disabled(!isToday)
+        }
+
+        if isToday {
+            AddTaskRow(dayKey: payload.dayKey) { title, dueDate, priority, categoryId in
+                store.createQuickTask(
+                    title: title,
+                    dueDate: dueDate,
+                    priority: priority,
+                    categoryId: categoryId,
+                )
+            } onFullEditor: { request in
+                store.createTask(request)
             }
         }
 
-        // Quick-add is hidden during review week — the server filters new
-        // tasks out of the paused list, so they would vanish on refresh.
-        if !payload.isReviewWeek {
-            addTaskRow
-        }
-
-        if !completed.isEmpty {
-            Button {
-                withAnimation(.easeOut(duration: 0.25)) { showCompleted.toggle() }
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Text("Completed (\(completed.count))")
-                        .font(.subheadJ)
-                        .foregroundStyle(Color.textSecondary)
-                    Image(systemName: showCompleted ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.textTertiary)
-                }
-            }
-            .buttonStyle(.plain)
-        }
-
-        ForEach(showCompleted ? completed : []) { task in
+        ForEach(completed) { task in
             TaskRow(
                 task: task,
-                onToggle: { store.uncompleteTask(task) },
+                onToggle: { if isToday { store.uncompleteTask(task) } },
                 onTap: {},
             )
+            .disabled(!isToday)
         }
-    }
-
-    @ViewBuilder
-    private var addTaskRow: some View {
-        if isAddingTask {
-            VStack(alignment: .leading, spacing: Space.sm) {
-                HStack(spacing: Space.md) {
-                    Image(systemName: "circle")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Color.textTertiary)
-                    TextField("Task title", text: $newTaskTitle)
-                        .font(.headlineJ)
-                        .textFieldStyle(.plain)
-                        .focused($addTaskFocused)
-                        .onSubmit { submitQuickTask() }
-                    Button("Cancel") {
-                        isAddingTask = false
-                        newTaskTitle = ""
-                    }
-                    .buttonStyle(.plain)
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.textTertiary)
-                }
-                HStack(spacing: Space.sm) {
-                    quickDueChip
-                    quickPriorityChip
-                    quickCategoryChip
-                    Spacer(minLength: Space.sm)
-                    Button("More…") { openFullEditor() }
-                        .buttonStyle(.jarvisGhost)
-                }
-                .padding(.leading, 22 + Space.md)
-            }
-            .frame(minHeight: RowHeight.standard)
-        } else {
-            Button {
-                isAddingTask = true
-                quickDueChoice = .today
-                quickPriority = .medium
-                quickCategoryId = nil
-                addTaskFocused = true
-                Task {
-                    if let response = try? await model.api.taskCategories() {
-                        quickCategories = response.categories
-                    }
-                }
-            } label: {
-                Text("+ Add task")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.jarvisGhost)
-        }
-    }
-
-    private var quickDueChip: some View {
-        Menu {
-            Button("Today") { quickDueChoice = .today }
-            Button("Tomorrow") { quickDueChoice = .tomorrow }
-            Button("None") { quickDueChoice = .none }
-        } label: {
-            HStack(spacing: Space.xs) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 10))
-                Text(quickDueChoice.label)
-                    .font(.captionJ)
-            }
-            .foregroundStyle(Color.textSecondary)
-            .padding(.horizontal, Space.sm)
-            .padding(.vertical, 3)
-            .background(Color.bgSubtle, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Due date: \(quickDueChoice.label)")
-    }
-
-    private var quickPriorityChip: some View {
-        Menu {
-            Button("P1 High") { quickPriority = .high }
-            Button("P2 Medium") { quickPriority = .medium }
-            Button("P3 Low") { quickPriority = .low }
-        } label: {
-            PriorityFlag(quickPriority.flagLevel)
-                .padding(.horizontal, Space.sm)
-                .padding(.vertical, 3)
-                .background(Color.bgSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Priority: \(quickPriority.flagLevel.label)")
-    }
-
-    @ViewBuilder
-    private var quickCategoryChip: some View {
-        if !quickCategories.isEmpty {
-            Menu {
-                Button("None") { quickCategoryId = nil }
-                ForEach(quickCategories) { category in
-                    Button(category.name) { quickCategoryId = category.id }
-                }
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Image(systemName: "tag")
-                        .font(.system(size: 10))
-                    Text(quickCategories.first(where: { $0.id == quickCategoryId })?.name ?? "Category")
-                        .font(.captionJ)
-                }
-                .foregroundStyle(quickCategoryId == nil ? Color.textSecondary : Color.accentPrimary)
-                .padding(.horizontal, Space.sm)
-                .padding(.vertical, 3)
-                .background(quickCategoryId == nil ? Color.bgSubtle : Color.accentSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel(
-                "Category: \(quickCategories.first(where: { $0.id == quickCategoryId })?.name ?? "none")",
-            )
-        }
-    }
-
-    /// "More…" hands the typed title to the full editor (goals fetched lazily).
-    private func openFullEditor() {
-        Task {
-            if let response = try? await model.api.goals() {
-                quickEditorGoals = response.goals
-            }
-            showQuickEditor = true
-        }
-    }
-
-    private func submitQuickTask() {
-        let title = newTaskTitle
-        let dueDate: String? = {
-            guard let dayKey = store.payload?.dayKey else { return nil }
-            switch quickDueChoice {
-            case .today: return dayKey
-            case .tomorrow: return DayKeyMath.addDays(dayKey, 1)
-            case .none: return nil
-            }
-        }()
-        let priority = quickPriority
-        let categoryId = quickCategoryId
-        newTaskTitle = ""
-        isAddingTask = false
-        store.createQuickTask(title: title, dueDate: dueDate, priority: priority, categoryId: categoryId)
     }
 
     private var heroEmptyState: some View {
@@ -672,7 +492,7 @@ struct TodayView: View {
     // MARK: - Habits
 
     @ViewBuilder
-    private func habitsSection(_ payload: DayPayload) -> some View {
+    private func habitsSection(_ payload: DayPayload, isToday: Bool) -> some View {
         SectionHeader("Habits")
             .padding(.top, Space.sm)
 
@@ -692,7 +512,7 @@ struct TodayView: View {
         }
 
         ForEach(active) { entry in
-            habitRow(entry, payload: payload, subdued: false)
+            habitRow(entry, payload: payload, subdued: false, isToday: isToday)
         }
 
         if !alsoAvailable.isEmpty {
@@ -704,7 +524,7 @@ struct TodayView: View {
         }
 
         ForEach(alsoAvailable) { entry in
-            habitRow(entry, payload: payload, subdued: true)
+            habitRow(entry, payload: payload, subdued: true, isToday: isToday)
         }
     }
 
@@ -712,7 +532,12 @@ struct TodayView: View {
         entry.habit.type == .weeklyFrequency && !entry.plannedToday && entry.repsToday == 0
     }
 
-    private func habitRow(_ entry: HabitTodayEntryDTO, payload: DayPayload, subdued: Bool) -> some View {
+    private func habitRow(
+        _ entry: HabitTodayEntryDTO,
+        payload: DayPayload,
+        subdued: Bool,
+        isToday: Bool,
+    ) -> some View {
         HStack(spacing: Space.md) {
             Image(systemName: HabitDisplay.icon(for: entry.habit))
                 .font(.system(size: 15))
@@ -726,31 +551,27 @@ struct TodayView: View {
 
             Spacer(minLength: Space.sm)
 
-            habitControl(entry, payload: payload)
+            habitControl(entry, payload: payload, isToday: isToday)
         }
         .frame(minHeight: RowHeight.standard)
-        .contentShape(Rectangle())
-        .onTapGesture { detailRoute = HabitDetailRoute(habitId: entry.habit.id) }
         .contextMenu {
             Button("Undo last") {
-                store.unlogHabit(entry.habit.id)
+                store.unlogHabit(entry.habit.id, dayKey: payload.dayKey)
             }
             .disabled(entry.repsToday == 0)
-            Button("View details") {
-                detailRoute = HabitDetailRoute(habitId: entry.habit.id)
-            }
         }
     }
 
     @ViewBuilder
-    private func habitControl(_ entry: HabitTodayEntryDTO, payload: DayPayload) -> some View {
+    private func habitControl(_ entry: HabitTodayEntryDTO, payload: DayPayload, isToday: Bool) -> some View {
+        let dayKey = payload.dayKey
         switch entry.habit.type {
         case .daily:
             Button {
                 if entry.repsToday > 0 {
-                    store.unlogHabit(entry.habit.id)
+                    store.unlogHabit(entry.habit.id, dayKey: dayKey)
                 } else {
-                    store.logHabit(entry.habit.id)
+                    store.logHabit(entry.habit.id, dayKey: dayKey)
                 }
             } label: {
                 Image(systemName: entry.repsToday > 0 ? "checkmark.circle.fill" : "circle")
@@ -765,11 +586,11 @@ struct TodayView: View {
                 RepPips(done: entry.repsToday, target: entry.habit.targetReps)
                 logCapsuleButton(
                     disabled: entry.repsToday >= entry.habit.targetReps,
-                    action: { store.logHabit(entry.habit.id) },
+                    action: { store.logHabit(entry.habit.id, dayKey: dayKey) },
                 )
                 .contextMenu {
                     Button("Undo last") {
-                        store.unlogHabit(entry.habit.id)
+                        store.unlogHabit(entry.habit.id, dayKey: dayKey)
                     }
                     .disabled(entry.repsToday == 0)
                 }
@@ -782,14 +603,22 @@ struct TodayView: View {
                     done: entry.weekTotal,
                     expectedByTonight: HabitDisplay.expectedByTonight(
                         target: entry.habit.targetReps,
-                        dayKey: payload.dayKey,
+                        dayKey: dayKey,
                     ),
-                    status: HabitDisplay.paceStatus(entry.pace),
+                    // A past day's pace is settled, so use the week total
+                    // rather than the "are you behind right now" wording.
+                    status: isToday
+                        ? HabitDisplay.paceStatus(entry.pace)
+                        : HabitDisplay.weeklyStatus(
+                            total: entry.weekTotal,
+                            target: entry.habit.targetReps,
+                            dayKey: dayKey,
+                        ),
                 )
                 .frame(maxWidth: 190)
                 logCapsuleButton(
                     disabled: false,
-                    action: { store.logHabit(entry.habit.id) },
+                    action: { store.logHabit(entry.habit.id, dayKey: dayKey) },
                 )
             }
         }
@@ -811,13 +640,201 @@ struct TodayView: View {
     }
 }
 
+// MARK: - Quick add
+
+/// The inline task composer. Extracted so the day pager can simply leave it
+/// out of past pages instead of threading its five pieces of state through
+/// every page.
+private struct AddTaskRow: View {
+    let dayKey: DayKey
+    let onQuickAdd: (String, String?, TaskPriority, String?) -> Void
+    let onFullEditor: (TaskCreateRequest) -> Void
+
+    @Environment(AppModel.self) private var model
+    @State private var isAdding = false
+    @State private var title = ""
+    @State private var dueChoice: QuickDueChoice = .today
+    @State private var priority: TaskPriority = .medium
+    @State private var categories: [TaskCategoryDTO] = []
+    @State private var categoryId: String?
+    @State private var showEditor = false
+    @FocusState private var focused: Bool
+
+    private enum QuickDueChoice {
+        case today, tomorrow, none
+
+        var label: String {
+            switch self {
+            case .today: "Today"
+            case .tomorrow: "Tomorrow"
+            case .none: "No date"
+            }
+        }
+    }
+
+    var body: some View {
+        content
+            .sheet(isPresented: $showEditor) {
+                TaskEditorView(
+                    defaultDueDate: dayKey,
+                    initialTitle: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                ) { request in
+                    onFullEditor(request)
+                    title = ""
+                    isAdding = false
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isAdding {
+            VStack(alignment: .leading, spacing: Space.sm) {
+                HStack(spacing: Space.md) {
+                    Image(systemName: "circle")
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Color.textTertiary)
+                    TextField("Task title", text: $title)
+                        .font(.headlineJ)
+                        .textFieldStyle(.plain)
+                        .focused($focused)
+                        .onSubmit(submit)
+                    Button("Cancel") {
+                        isAdding = false
+                        title = ""
+                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textTertiary)
+                }
+                HStack(spacing: Space.sm) {
+                    dueChip
+                    priorityChip
+                    categoryChip
+                    Spacer(minLength: Space.sm)
+                    Button("More…") { showEditor = true }
+                        .buttonStyle(.jarvisGhost)
+                }
+                .padding(.leading, 22 + Space.md)
+            }
+            .frame(minHeight: RowHeight.standard)
+        } else {
+            Button {
+                isAdding = true
+                dueChoice = .today
+                priority = .medium
+                categoryId = nil
+                focused = true
+                Task {
+                    if let response = try? await model.api.taskCategories() {
+                        categories = response.categories
+                    }
+                }
+            } label: {
+                Text("+ Add task")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.jarvisGhost)
+        }
+    }
+
+    private var dueChip: some View {
+        Menu {
+            Button("Today") { dueChoice = .today }
+            Button("Tomorrow") { dueChoice = .tomorrow }
+            Button("None") { dueChoice = .none }
+        } label: {
+            HStack(spacing: Space.xs) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10))
+                Text(dueChoice.label)
+                    .font(.captionJ)
+            }
+            .foregroundStyle(Color.textSecondary)
+            .padding(.horizontal, Space.sm)
+            .padding(.vertical, 3)
+            .background(Color.bgSubtle, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Due date: \(dueChoice.label)")
+    }
+
+    private var priorityChip: some View {
+        Menu {
+            Button("P1 High") { priority = .high }
+            Button("P2 Medium") { priority = .medium }
+            Button("P3 Low") { priority = .low }
+        } label: {
+            PriorityFlag(priority.flagLevel)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, 3)
+                .background(Color.bgSubtle, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Priority: \(priority.flagLevel.label)")
+    }
+
+    @ViewBuilder
+    private var categoryChip: some View {
+        if !categories.isEmpty {
+            Menu {
+                Button("None") { categoryId = nil }
+                ForEach(categories) { category in
+                    Button(category.name) { categoryId = category.id }
+                }
+            } label: {
+                HStack(spacing: Space.xs) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 10))
+                    Text(categories.first(where: { $0.id == categoryId })?.name ?? "Category")
+                        .font(.captionJ)
+                }
+                .foregroundStyle(categoryId == nil ? Color.textSecondary : Color.accentPrimary)
+                .padding(.horizontal, Space.sm)
+                .padding(.vertical, 3)
+                .background(categoryId == nil ? Color.bgSubtle : Color.accentSubtle, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(
+                "Category: \(categories.first(where: { $0.id == categoryId })?.name ?? "none")",
+            )
+        }
+    }
+
+    private func submit() {
+        let dueDate: String? = switch dueChoice {
+        case .today: dayKey
+        case .tomorrow: DayKeyMath.addDays(dayKey, 1)
+        case .none: nil
+        }
+        let submitted = title
+        title = ""
+        isAdding = false
+        onQuickAdd(submitted, dueDate, priority, categoryId)
+    }
+}
+
 // MARK: - Mood card
 
 /// "How do you feel?" — compact gradient slider (0–100). One caption line
 /// with a live word label, then a slim track. Unset = hollow knob, "—" for
 /// the value, faint accent card tint. Commits on release (a tap counts).
+///
+/// Identical on today and on a back-day: rating a day you missed is the
+/// reason the pager exists.
 private struct MoodCard: View {
+    let dayKey: DayKey
     let mood: MoodDTO?
+    let isToday: Bool
     let onCommit: (Int) -> Void
 
     @State private var value: Double = 50
@@ -839,7 +856,7 @@ private struct MoodCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             HStack(spacing: Space.sm) {
-                Text("How do you feel?")
+                Text(isToday ? "How do you feel?" : "How did you feel?")
                     .font(.subheadJ)
                     .foregroundStyle(Color.textSecondary)
                 Spacer(minLength: Space.sm)
@@ -864,36 +881,15 @@ private struct MoodCard: View {
             RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                 .strokeBorder(Color.borderHairline, lineWidth: 0.5),
         )
-        .onAppear {
-            if let mood { value = Double(mood.value) }
+        // Keyed on dayKey: swiping to another page reuses this view, and
+        // without the reset the previous day's number would linger on the
+        // knob until the payload arrived.
+        .onChange(of: dayKey, initial: true) {
+            value = Double(mood?.value ?? 50)
         }
         .onChange(of: mood?.value) { _, newValue in
             if let newValue, !isDragging { value = Double(newValue) }
         }
-    }
-}
-
-/// Backfill row: "Yesterday's feel?" mini slider + Skip.
-private struct MoodBackfillRow: View {
-    let onCommit: (Int) -> Void
-    let onSkip: () -> Void
-
-    @State private var value: Double = 50
-    @State private var isDragging = false
-
-    var body: some View {
-        HStack(spacing: Space.md) {
-            Text("Yesterday's feel?")
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
-                .layoutPriority(1)
-            MoodSlider(value: $value, isSet: isDragging, isDragging: $isDragging, onCommit: onCommit)
-            Button("Skip", action: onSkip)
-                .buttonStyle(.jarvisGhost)
-        }
-        .padding(.horizontal, Space.lg)
-        .padding(.vertical, Space.sm)
-        .background(Color.bgSubtle.opacity(0.6), in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     }
 }
 

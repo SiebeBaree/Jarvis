@@ -33,7 +33,6 @@ const checkin = (over: Partial<CheckinLike> = {}): CheckinLike => ({
   id: "chk-1",
   weekKey: "2026-07-06",
   dayKey: "2026-07-08",
-  aiCommentary: "Shoulders less rounded than last week.",
   createdAt: new Date("2026-07-08T10:00:00Z"),
   ...over,
 });
@@ -51,7 +50,7 @@ describe("buildAreaDTO due logic", () => {
   it("check-in this week → not due, thisWeek populated", () => {
     const dto = buildAreaDTO(area(), checkin(), currentWeek);
     expect(dto.dueThisWeek).toBe(false);
-    expect(dto.thisWeek).toEqual({ id: "chk-1", dayKey: "2026-07-08", hasCommentary: true });
+    expect(dto.thisWeek).toEqual({ id: "chk-1", dayKey: "2026-07-08" });
   });
 
   it("check-in from a previous week → due again", () => {
@@ -59,11 +58,6 @@ describe("buildAreaDTO due logic", () => {
     expect(dto.dueThisWeek).toBe(true);
     expect(dto.thisWeek).toBeNull();
     expect(dto.lastCheckinAt).toBe("2026-07-01");
-  });
-
-  it("pending commentary is reported", () => {
-    const dto = buildAreaDTO(area(), checkin({ aiCommentary: null }), currentWeek);
-    expect(dto.thisWeek?.hasCommentary).toBe(false);
   });
 
   it("archived areas are never due", () => {

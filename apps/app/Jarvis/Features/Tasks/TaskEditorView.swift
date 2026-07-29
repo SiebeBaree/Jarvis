@@ -8,7 +8,6 @@ struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    let goals: [GoalDTO]
     let defaultDueDate: String
     /// Prefills the title field (quick-add "More…" hands off the typed text).
     var initialTitle: String? = nil
@@ -23,7 +22,6 @@ struct TaskEditorView: View {
     @State private var hasTime = false
     @State private var dueTime: Date = .now
     @State private var priority: TaskPriority = .medium
-    @State private var goalId: String?
     @State private var categories: [TaskCategoryDTO] = []
     @State private var categoryId: String?
     @State private var showNewCategoryAlert = false
@@ -78,13 +76,6 @@ struct TaskEditorView: View {
                     }
                     .font(.subheadJ)
                     .foregroundStyle(Color.accentPrimary)
-
-                    Picker("Goal", selection: $goalId) {
-                        Text("None").tag(String?.none)
-                        ForEach(goals) { goal in
-                            Text(goal.title).tag(Optional(goal.id))
-                        }
-                    }
                 }
 
                 Section {
@@ -190,7 +181,6 @@ struct TaskEditorView: View {
                     title: trimmed,
                     notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                     priority: priority,
-                    goalId: goalId,
                     categoryId: categoryId,
                     dueTime: timeString,
                     rule: normalizedRule(),
@@ -208,7 +198,6 @@ struct TaskEditorView: View {
                     dueDate: hasDueDate ? dayKey : nil,
                     dueTime: timeString,
                     priority: priority,
-                    goalId: goalId,
                     categoryId: categoryId,
                 ),
             )

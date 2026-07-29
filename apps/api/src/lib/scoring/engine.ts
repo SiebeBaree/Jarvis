@@ -126,8 +126,6 @@ export interface DailyScoreInput {
   taskRaw: number | null;
   habitRaw: number | null;
   feelRaw: number | null;
-  /** Week 13: the tasks component is dropped entirely. */
-  isReviewWeek: boolean;
 }
 
 export interface DailyScoreResult {
@@ -141,7 +139,7 @@ export interface DailyScoreResult {
 export function computeDailyScore(input: DailyScoreInput): DailyScoreResult {
   const components: { weight: number; raw: number }[] = [];
 
-  const taskRaw = input.isReviewWeek ? null : input.taskRaw;
+  const taskRaw = input.taskRaw;
   if (taskRaw !== null) components.push({ weight: input.weights.tasks, raw: taskRaw });
   if (input.habitRaw !== null) components.push({ weight: input.weights.habits, raw: input.habitRaw });
   if (input.feelRaw !== null) components.push({ weight: input.weights.feel, raw: input.feelRaw });

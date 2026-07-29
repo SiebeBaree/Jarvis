@@ -63,7 +63,7 @@ struct TasksView: View {
             }
         }
         .sheet(isPresented: $showingEditor) {
-            TaskEditorView(goals: store.goals, defaultDueDate: store.todayKey) { request in
+            TaskEditorView(defaultDueDate: store.todayKey) { request in
                 store.create(request)
             }
         }
@@ -85,9 +85,7 @@ struct TasksView: View {
         #endif
         .task {
             store.bind(model)
-            async let goalsTask: Void = store.fetchGoals()
-            async let categoriesTask: Void = store.fetchCategories()
-            _ = await (goalsTask, categoriesTask)
+            await store.fetchCategories()
             await store.fetch()
         }
         // Mutations anywhere (here, Today, the detail sheet) invalidate the
@@ -338,7 +336,6 @@ struct TasksView: View {
     private func row(for task: TaskDTO, overdueLabel: String? = nil) -> some View {
         TaskRow(
             task: task,
-            goalTitle: store.goalTitle(for: task.goalId),
             // Hide the chip while filtering on that category — pure noise then.
             category: store.selectedCategoryId == nil ? store.category(for: task.categoryId) : nil,
             overdueLabel: overdueLabel,

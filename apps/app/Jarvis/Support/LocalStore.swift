@@ -8,11 +8,8 @@ enum Entity: String, Codable, Sendable {
     case habit
     case mood
     case goal
-    case tactic
-    case block
     case category
     case area
-    case vision
     case score
     case metric
     case improvement
@@ -20,8 +17,7 @@ enum Entity: String, Codable, Sendable {
     /// For the "something changed, I don't know what" callers that predate
     /// entity tracking — behaves like the old blanket invalidation.
     static let all: Set<Entity> = [
-        .task, .habit, .mood, .goal, .tactic, .block,
-        .category, .area, .vision, .score, .metric, .improvement,
+        .task, .habit, .mood, .goal, .category, .area, .score, .metric, .improvement,
     ]
 }
 
@@ -33,8 +29,6 @@ enum CacheKey: Hashable, Sendable {
     case tasks(segment: String)
     case goals
     case taskCategories
-    case currentBlock
-    case vision
     case areas
     case habits
     case metrics
@@ -50,8 +44,6 @@ enum CacheKey: Hashable, Sendable {
         case .tasks(let segment): "tasks-\(segment)"
         case .goals: "goals"
         case .taskCategories: "task-categories"
-        case .currentBlock: "block-current"
-        case .vision: "vision"
         case .areas: "areas"
         case .habits: "habits"
         case .metrics: "metrics"
@@ -65,12 +57,10 @@ enum CacheKey: Hashable, Sendable {
     /// Mutating any of these makes this entry stale.
     var entities: Set<Entity> {
         switch self {
-        case .today: [.task, .habit, .mood, .block, .score]
+        case .today: [.task, .habit, .mood, .score]
         case .tasks: [.task, .category]
         case .goals: [.goal]
         case .taskCategories: [.category]
-        case .currentBlock: [.block, .goal, .tactic, .score]
-        case .vision: [.vision]
         case .areas: [.area]
         case .habits: [.habit]
         case .metrics: [.metric]

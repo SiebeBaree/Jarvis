@@ -30,20 +30,6 @@ public struct MetricEntryListResponse: Codable, Sendable {
     public let entries: [MetricEntryDTO]
 }
 
-// MARK: - Weekly scores
-
-public struct WeeklyScoreDTO: Codable, Sendable, Identifiable, Equatable {
-    public var id: Int { weekNumber }
-    public let weekNumber: Int
-    public let avg: Double?
-    public let from: DayKey
-    public let to: DayKey
-}
-
-public struct WeeklyScoresResponse: Codable, Sendable {
-    public let weeks: [WeeklyScoreDTO]
-}
-
 // MARK: - Photos
 
 public struct PhotoDTO: Codable, Sendable, Identifiable, Equatable {

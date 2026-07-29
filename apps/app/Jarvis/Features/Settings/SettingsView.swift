@@ -3,7 +3,7 @@ import JarvisAPI
 import SwiftUI
 
 /// Settings sheet content. Today's gear presents it wrapped in a
-/// NavigationStack, so the Plan editors can push from inside the sheet.
+/// NavigationStack, so the area editor can push from inside the sheet.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -11,7 +11,6 @@ struct SettingsView: View {
     @AppStorage("appearanceMode") private var appearanceMode = "system"
     @State private var confirmingSignOut = false
     @State private var isSigningOut = false
-    @State private var showSetupWizard = false
     @State private var confirmingReset = false
     @State private var isResetting = false
     @State private var resetError: String?
@@ -22,7 +21,6 @@ struct SettingsView: View {
             appearanceSection
             scoringSection
             planSection
-            jarvisSection
             dangerSection
             aboutSection
         }
@@ -118,19 +116,8 @@ struct SettingsView: View {
     }
 
     private var planSection: some View {
-        Section("Plan") {
+        Section("Organize") {
             NavigationLink("Areas") { AreasEditorView() }
-            NavigationLink("Goals") { GoalsEditorView() }
-            Button("Run the setup wizard") {
-                showSetupWizard = true
-            }
-            .setupWizardCover(isPresented: $showSetupWizard)
-        }
-    }
-
-    private var jarvisSection: some View {
-        Section("J.A.R.V.I.S.") {
-            NavigationLink("What J.A.R.V.I.S. knows") { MemoryView() }
         }
     }
 
@@ -178,7 +165,6 @@ struct SettingsView: View {
             do {
                 _ = try await model.api.resetAccount()
                 model.invalidateToday()
-                model.needsFirstRunOnboarding = true
                 dismiss()
             } catch {
                 model.handle(error)

@@ -29,13 +29,11 @@ export const POST = handler(async (request: Request) => {
       title: body.title,
       notes: body.notes ?? null,
       priority: body.priority ?? "medium",
-      goalId: body.goalId ?? null,
       categoryId: body.categoryId ?? null,
       dueTime: body.dueTime ?? null,
       rule: body.rule,
       startDate: body.startDate,
       endDate: body.endDate ?? null,
-      showInReviewWeek: body.showInReviewWeek ?? false,
     })
     .returning();
   if (!created) throw new ApiError(500, "internal_error", "Could not create template");

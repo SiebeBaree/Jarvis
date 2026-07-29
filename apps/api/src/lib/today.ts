@@ -2,24 +2,14 @@
 // GET /days/today triggers recurrence materialization + a provisional score
 // recompute, so opening the app is what keeps the world consistent.
 
-import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { db } from "@/db/client";
-import { blocks, habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
+import { habits, moodEntries, recurrenceTemplates, tasks } from "@/db/schema";
 import type { SettingsRow } from "./auth";
-import { reconcileBlockStatuses } from "./blocks";
-import {
-  addDays,
-  dayKeyFor,
-  isReviewWeek as isReviewWeekFn,
-  weekEnd,
-  weekStart,
-  weekIndexInBlock,
-  type DayKey,
-} from "./daykey";
+import { addDays, dayKeyFor, weekEnd, weekStart, type DayKey } from "./daykey";
 import { occurrencesToGenerate } from "./recurrence";
 import { paceStatus, type PaceStatus, type TaskForScoring } from "./scoring/engine";
 import {
-  activeBlockFor,
   applicableHabits,
   finalizeThrough,
   localHour,
@@ -62,7 +52,6 @@ export async function materializeTemplates(
         title: template.title,
         notes: template.notes,
         priority: template.priority,
-        goalId: template.goalId,
         categoryId: template.categoryId,
         dueDate: dayKey,
         dueTime: template.dueTime,
@@ -136,24 +125,13 @@ export interface HabitTodayEntry {
 
 export interface DayPayload {
   dayKey: DayKey;
-  weekNumber: number | null;
-  isReviewWeek: boolean;
-  block: { id: string; number: number; title: string; startDate: string; endDate: string } | null;
-  /** Set when no block covers this day but one is scheduled to start later —
-   * the client shows "starts Monday" instead of the plan-setup banner. */
-  upcomingBlock: { id: string; number: number; title: string; startDate: string; endDate: string } | null;
   score: DaySnapshot;
   tasksDue: TaskDTO[];
+  /** Open tasks from earlier days. Empty on a historical day payload — a past
+   * day's overdue list is noise, not something you can still act on. */
   overdueTasks: TaskDTO[];
   habits: HabitTodayEntry[];
   mood: { value: number; note: string | null } | null;
-  /** Today only: yesterday has no mood entry yet (backfill row in the UI). */
-  yesterdayMoodMissing: boolean;
-  /**
-   * Review week only: top-level non-cancelled tasks due this day that are
-   * hidden by the week-13 task pause ("tasks are paused" copy). 0 otherwise.
-   */
-  pausedTaskCount: number;
 }
 
 export async function buildDayPayload(
@@ -164,31 +142,20 @@ export async function buildDayPayload(
   now = new Date(),
 ): Promise<DayPayload> {
   if (options.isToday) {
-    // Independent bookkeeping — no reason to pay for them one after another.
-    await Promise.all([
-      materializeTemplates(userId, settings, now),
-      reconcileBlockStatuses(userId, dayKey),
-    ]);
+    await materializeTemplates(userId, settings, now);
     await finalizeThrough(userId, settings, now);
   }
-
-  // The block decides review-week behaviour, so it has to land before the
-  // rest. Everything after it goes out in a single parallel batch, and the
-  // score is computed from those same rows instead of re-reading them.
-  const block = await activeBlockFor(userId, dayKey);
-  const isReviewWeek = block ? isReviewWeekFn(dayKey, block.startDate, block.endDate) : false;
 
   // One rep query covering both windows (score week + trailing 7 days).
   const repsFrom = weekStart(dayKey) < addDays(dayKey, -6) ? weekStart(dayKey) : addDays(dayKey, -6);
   const repsTo = weekEnd(dayKey) > dayKey ? weekEnd(dayKey) : dayKey;
 
-  const [dueTop, overdueTop, dayHabits, allReps, mood, yesterdayMood, upcoming] = await Promise.all([
+  const [dueTop, overdueTop, dayHabits, allReps, mood] = await Promise.all([
     db.query.tasks.findMany({
       where: and(eq(tasks.userId, userId), eq(tasks.dueDate, dayKey), isNull(tasks.parentTaskId)),
       orderBy: [asc(tasks.sortOrder), asc(tasks.createdAt)],
     }),
-    // Review week pauses tasks: no overdue nagging during week 13.
-    !isReviewWeek
+    options.isToday
       ? db.query.tasks.findMany({
           where: and(
             eq(tasks.userId, userId),
@@ -205,21 +172,6 @@ export async function buildDayPayload(
     db.query.moodEntries.findFirst({
       where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, dayKey)),
     }),
-    options.isToday
-      ? db.query.moodEntries.findFirst({
-          where: and(eq(moodEntries.userId, userId), eq(moodEntries.dayKey, addDays(dayKey, -1))),
-        })
-      : Promise.resolve(undefined),
-    block
-      ? Promise.resolve(undefined)
-      : db.query.blocks.findFirst({
-          where: and(
-            eq(blocks.userId, userId),
-            gt(blocks.startDate, dayKey),
-            ne(blocks.status, "completed"),
-          ),
-          orderBy: [asc(blocks.startDate)],
-        }),
   ]);
 
   const reps = sliceReps(allReps, weekStart(dayKey), weekEnd(dayKey));
@@ -241,37 +193,11 @@ export async function buildDayPayload(
   }));
 
   const snapshot = await recomputeDay(userId, settings, dayKey, now, {
-    block,
     dayHabits,
     reps,
     mood,
     dueTasks: dueForScoring,
   });
-
-  // Week 13 hides due tasks except templates that opted into "Scheduled anyway".
-  let visibleDue = dueTop;
-  let pausedTaskCount = 0;
-  if (isReviewWeek) {
-    const templateIds = [
-      ...new Set(dueTop.map((t) => t.templateId).filter((id): id is string => id !== null)),
-    ];
-    const shownTemplates =
-      templateIds.length === 0
-        ? []
-        : await db.query.recurrenceTemplates.findMany({
-            where: and(
-              inArray(recurrenceTemplates.id, templateIds),
-              eq(recurrenceTemplates.showInReviewWeek, true),
-            ),
-            columns: { id: true },
-          });
-    const shown = new Set(shownTemplates.map((t) => t.id));
-    visibleDue = dueTop.filter((t) => t.templateId !== null && shown.has(t.templateId));
-    const visibleIds = new Set(visibleDue.map((t) => t.id));
-    pausedTaskCount = dueTop.filter(
-      (t) => t.status !== "cancelled" && !visibleIds.has(t.id),
-    ).length;
-  }
 
   const hour = localHour(settings, now);
   const creditByHabit = new Map(snapshot.breakdown.habits.map((h) => [h.habitId, h.credit]));
@@ -316,32 +242,10 @@ export async function buildDayPayload(
 
   return {
     dayKey,
-    weekNumber: block ? weekIndexInBlock(dayKey, block.startDate) : null,
-    isReviewWeek,
-    block: block
-      ? {
-          id: block.id,
-          number: block.number,
-          title: block.title,
-          startDate: block.startDate,
-          endDate: block.endDate,
-        }
-      : null,
-    upcomingBlock: upcoming
-      ? {
-          id: upcoming.id,
-          number: upcoming.number,
-          title: upcoming.title,
-          startDate: upcoming.startDate,
-          endDate: upcoming.endDate,
-        }
-      : null,
     score: snapshot,
-    tasksDue: attach(visibleDue),
+    tasksDue: attach(dueTop),
     overdueTasks: attach(overdueTop),
     habits: habitEntries,
     mood: mood ? { value: mood.value, note: mood.note } : null,
-    yesterdayMoodMissing: options.isToday && !yesterdayMood,
-    pausedTaskCount,
   };
 }

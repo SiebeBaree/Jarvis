@@ -138,11 +138,6 @@ struct ImproveView: View {
                     .foregroundStyle(area.dueThisWeek ? Color.accentPrimary : Color.textSecondary)
             }
             Spacer(minLength: Space.sm)
-            if area.thisWeek?.hasCommentary == false {
-                ProgressView()
-                    .controlSize(.small)
-                    .help("J.A.R.V.I.S. is reviewing this week's photo")
-            }
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.textTertiary)
@@ -156,9 +151,7 @@ struct ImproveView: View {
     private func subtitle(_ area: ImprovementAreaDTO) -> String {
         if area.dueThisWeek { return "Check-in due this week" }
         if let thisWeek = area.thisWeek {
-            return thisWeek.hasCommentary
-                ? "Checked in \(HabitDisplay.shortLabel(for: thisWeek.dayKey)) — commentary ready"
-                : "Checked in \(HabitDisplay.shortLabel(for: thisWeek.dayKey))"
+            return "Checked in \(HabitDisplay.shortLabel(for: thisWeek.dayKey))"
         }
         if let last = area.lastCheckinAt {
             return "Last check-in \(HabitDisplay.shortLabel(for: last))"

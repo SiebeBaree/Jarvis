@@ -23,20 +23,16 @@ final class AppModel {
     /// pick it up when the write lands.
     private(set) var dataRevision = 0
 
-    /// Cross-tab navigation requests (week chip → Plan, empty states → Habits...).
+    /// Cross-tab navigation requests (empty states → Habits, Goals...).
     /// MainShell consumes and clears it.
     var requestedSection: AppSection?
 
-    /// Live block context for the macOS sidebar label; TodayStore updates it.
-    struct PlanContext: Equatable {
-        var weekNumber: Int?
-        var isReviewWeek: Bool
-    }
-
-    private(set) var planContext = PlanContext(weekNumber: nil, isReviewWeek: false)
-
-    /// True right after account creation — triggers the automatic first-run interview.
-    var needsFirstRunOnboarding = false
+    /// Bumped by every local write. A fetch that was already in flight when a
+    /// write happened is answering an older question: applying its response
+    /// would wipe the optimistic change off the screen until the next refresh
+    /// put it back — the flicker you get tapping two habits in a row. Stores
+    /// capture this before fetching and discard the response if it moved.
+    private(set) var writeTicket = 0
 
     init() {
         self.api = APIClient(baseURL: Config.apiBaseURL)
@@ -70,9 +66,15 @@ final class AppModel {
     ) {
         // Local state is already ahead of the caches, so mark them stale now;
         // the revision bump waits until the server confirms.
+        writeTicket &+= 1
         store.invalidate(entities)
         queue.enqueue(method: method, path: path, body: body, entities: entities, label: label)
     }
+
+    /// True when a write landed since `ticket` was taken, meaning a response
+    /// fetched under that ticket is already out of date.
+    @MainActor
+    func hasWritten(since ticket: Int) -> Bool { writeTicket != ticket }
 
     /// Marks the caches depending on `entities` stale and asks open screens to
     /// revalidate. Cached values are kept, so revalidation never blanks a screen.
@@ -91,19 +93,29 @@ final class AppModel {
     /// Trailing-edge debounce: a burst of landing writes triggers one refresh.
     private var revalidation: Task<Void, Never>?
 
+    /// How long to wait for the outbox before giving up on this round of
+    /// revalidation. Anything still queued after that is offline or wedged;
+    /// the next landing write schedules a fresh attempt.
+    private static let drainTimeout = 15
+
     @MainActor
     private func scheduleRevalidation() {
         revalidation?.cancel()
         revalidation = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            self?.dataRevision += 1
+            guard !Task.isCancelled, let self else { return }
+            // Revalidating with writes still queued refetches server state
+            // that predates them — the screen would drop the optimistic value
+            // and only get it back on the next refresh. Wait them out.
+            var waited = 0
+            while queue.hasPending {
+                guard waited < Self.drainTimeout else { return }
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
+                waited += 1
+            }
+            dataRevision += 1
         }
-    }
-
-    func updatePlanContext(weekNumber: Int?, isReviewWeek: Bool) {
-        let next = PlanContext(weekNumber: weekNumber, isReviewWeek: isReviewWeek)
-        if next != planContext { planContext = next }
     }
 
     // MARK: - Session lifecycle
@@ -164,7 +176,6 @@ final class AppModel {
         Keychain.saveToken(auth.token)
         await api.setToken(auth.token)
         let me = try await api.me()
-        needsFirstRunOnboarding = register // first run: account → interview (§B4)
         session = .loggedIn(me.user, me.settings)
         startQueue()
     }

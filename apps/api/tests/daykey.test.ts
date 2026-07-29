@@ -4,11 +4,9 @@ import {
   dayKeyFor,
   diffDays,
   elapsedDayOfWeek,
-  isReviewWeek,
   isValidDayKey,
   isoWeekday,
   weekEnd,
-  weekIndexInBlock,
   weekStart,
 } from "../src/lib/daykey";
 
@@ -83,22 +81,3 @@ describe("calendar arithmetic", () => {
   });
 });
 
-describe("block weeks", () => {
-  const blockStart = "2026-07-06"; // a Monday
-  const blockEnd = addDays(blockStart, 13 * 7 - 1); // 2026-10-04, Sunday of week 13
-
-  it("computes week index within a block", () => {
-    expect(weekIndexInBlock("2026-07-06", blockStart)).toBe(1);
-    expect(weekIndexInBlock("2026-07-12", blockStart)).toBe(1);
-    expect(weekIndexInBlock("2026-07-13", blockStart)).toBe(2);
-    expect(weekIndexInBlock(blockEnd, blockStart)).toBe(13);
-  });
-
-  it("flags week 13 as review week, inside the block only", () => {
-    expect(isReviewWeek(addDays(blockStart, 12 * 7), blockStart, blockEnd)).toBe(true);
-    expect(isReviewWeek(blockEnd, blockStart, blockEnd)).toBe(true);
-    expect(isReviewWeek(addDays(blockStart, 11 * 7), blockStart, blockEnd)).toBe(false);
-    expect(isReviewWeek(addDays(blockEnd, 1), blockStart, blockEnd)).toBe(false);
-    expect(isReviewWeek(addDays(blockStart, -1), blockStart, blockEnd)).toBe(false);
-  });
-});

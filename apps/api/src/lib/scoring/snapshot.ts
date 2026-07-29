@@ -5,7 +5,6 @@
 import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
-  blocks,
   dailyScores,
   habits,
   habitCompletions,
@@ -15,15 +14,7 @@ import {
   type ScoreBreakdown,
 } from "@/db/schema";
 import type { SettingsRow } from "../auth";
-import {
-  addDays,
-  dayKeyFor,
-  isReviewWeek as isReviewWeekFn,
-  isoWeekday,
-  weekEnd,
-  weekStart,
-  type DayKey,
-} from "../daykey";
+import { addDays, dayKeyFor, isoWeekday, weekEnd, weekStart, type DayKey } from "../daykey";
 import {
   computeDailyScore,
   feelRaw,
@@ -46,17 +37,6 @@ export function localHour(settings: SettingsRow, now = new Date()): number {
       hour12: false,
     }).format(now),
   );
-}
-
-export async function activeBlockFor(userId: string, dayKey: DayKey) {
-  return db.query.blocks.findFirst({
-    where: and(
-      eq(blocks.userId, userId),
-      eq(blocks.status, "active"),
-      lte(blocks.startDate, dayKey),
-      gte(blocks.endDate, dayKey),
-    ),
-  });
 }
 
 export type HabitRow = typeof habits.$inferSelect;
@@ -143,7 +123,6 @@ export interface DaySnapshot {
   habitPoints: number | null;
   feelPoints: number | null;
   applicableWeight: number;
-  isReviewWeek: boolean;
   isFinal: boolean;
   breakdown: ScoreBreakdown;
 }
@@ -151,15 +130,14 @@ export interface DaySnapshot {
 /**
  * Everything `recomputeDay` reads. Callers that already hold these rows (the
  * Today payload does) pass them in so the score costs zero extra queries —
- * otherwise it re-reads the block, habits, reps and mood a second time.
+ * otherwise it re-reads the habits, reps and mood a second time.
  */
 export interface DayScoringInputs {
-  block: Awaited<ReturnType<typeof activeBlockFor>>;
   dayHabits: HabitRow[];
   /** repCounts over [weekStart(dayKey), weekEnd(dayKey)]. */
   reps: Map<string, Map<DayKey, number>>;
   mood: { value: number } | undefined;
-  /** Top-level tasks due on `dayKey`, with subtasks. Ignored in review week. */
+  /** Top-level tasks due on `dayKey`, with subtasks. */
   dueTasks: TaskForScoring[];
 }
 
@@ -178,18 +156,10 @@ export async function recomputeDay(
   const today = todayKey(settings, now);
   const isLive = weekEnd(dayKey) >= today;
 
-  const block = prefetched ? prefetched.block : await activeBlockFor(userId, dayKey);
-  const reviewWeek = block ? isReviewWeekFn(dayKey, block.startDate, block.endDate) : false;
-
   const [dueTasks, dayHabits, reps, mood] = prefetched
-    ? ([
-        reviewWeek ? [] : prefetched.dueTasks,
-        prefetched.dayHabits,
-        prefetched.reps,
-        prefetched.mood,
-      ] as const)
+    ? ([prefetched.dueTasks, prefetched.dayHabits, prefetched.reps, prefetched.mood] as const)
     : await Promise.all([
-        reviewWeek ? Promise.resolve([]) : tasksForScoring(userId, dayKey, settings),
+        tasksForScoring(userId, dayKey, settings),
         applicableHabits(userId, dayKey, settings),
         repCounts(userId, weekStart(dayKey), weekEnd(dayKey)),
         db.query.moodEntries.findFirst({
@@ -231,17 +201,10 @@ export async function recomputeDay(
     taskRaw: taskResult.raw,
     habitRaw: habitComponentRaw(habitBreakdown.map((h) => h.credit)),
     feelRaw: feelRaw(mood?.value ?? null),
-    isReviewWeek: reviewWeek,
   });
 
   const breakdown: ScoreBreakdown = { tasks: taskResult.perTask, habits: habitBreakdown };
-  const snapshot: DaySnapshot = {
-    dayKey,
-    ...score,
-    isReviewWeek: reviewWeek,
-    isFinal: !isLive,
-    breakdown,
-  };
+  const snapshot: DaySnapshot = { dayKey, ...score, isFinal: !isLive, breakdown };
 
   await db
     .insert(dailyScores)
@@ -253,7 +216,6 @@ export async function recomputeDay(
       habitPoints: score.habitPoints,
       feelPoints: score.feelPoints,
       applicableWeight: score.applicableWeight,
-      isReviewWeek: reviewWeek,
       breakdown,
       isFinal: !isLive,
       computedAt: now,
@@ -266,7 +228,6 @@ export async function recomputeDay(
         habitPoints: score.habitPoints,
         feelPoints: score.feelPoints,
         applicableWeight: score.applicableWeight,
-        isReviewWeek: reviewWeek,
         breakdown,
         isFinal: !isLive,
         computedAt: now,

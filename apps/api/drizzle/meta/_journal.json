@@ -36,6 +36,20 @@
       "when": 1784665180050,
       "tag": "0004_reflective_bloodstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785347327792,
+      "tag": "0005_drop_ai_and_plan",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785347337553,
+      "tag": "0006_add_tracked_goals",
+      "breakpoints": true
     }
   ]
 }

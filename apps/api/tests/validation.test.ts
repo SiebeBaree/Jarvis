@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  blockPatchSchema,
+  goalCreateSchema,
+  goalPatchSchema,
   habitLogSchema,
   isValidTimezone,
   metricEntriesQuerySchema,
@@ -62,19 +63,45 @@ describe("client-supplied ids for idempotent writes", () => {
   });
 });
 
-describe("block patch", () => {
-  it("accepts title and startDate independently", () => {
-    expect(blockPatchSchema.safeParse({}).success).toBe(true);
-    expect(blockPatchSchema.safeParse({ title: "Q3" }).success).toBe(true);
-    expect(blockPatchSchema.safeParse({ startDate: "2026-07-06" }).success).toBe(true);
-    expect(blockPatchSchema.safeParse({ title: "Q3", startDate: "2026-07-06" }).success).toBe(true);
+describe("goal schemas", () => {
+  const base = { title: "Reach 10k MRR", targetDate: "2026-12-31" };
+
+  it("accepts an untracked goal (dates only)", () => {
+    expect(goalCreateSchema.safeParse(base).success).toBe(true);
   });
 
-  it("rejects a malformed startDate", () => {
-    expect(blockPatchSchema.safeParse({ startDate: "2026-13-01" }).success).toBe(false);
+  it("accepts a full numeric goal", () => {
+    const parsed = goalCreateSchema.safeParse({
+      ...base,
+      horizon: "long",
+      unit: "EUR",
+      startValue: 0,
+      targetValue: 10_000,
+      currentValue: 3400,
+    });
+    expect(parsed.success).toBe(true);
   });
 
-  it("still rejects unknown keys, endDate included (it follows from startDate)", () => {
-    expect(blockPatchSchema.safeParse({ endDate: "2026-10-04" }).success).toBe(false);
+  it("rejects a half-configured numeric target", () => {
+    expect(goalCreateSchema.safeParse({ ...base, targetValue: 10 }).success).toBe(false);
+    expect(goalCreateSchema.safeParse({ ...base, startValue: 10 }).success).toBe(false);
+  });
+
+  it("rejects a target equal to the baseline (no progress to measure)", () => {
+    expect(
+      goalCreateSchema.safeParse({ ...base, startValue: 80, targetValue: 80 }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a targetDate before the startDate", () => {
+    expect(
+      goalCreateSchema.safeParse({ ...base, startDate: "2027-01-01" }).success,
+    ).toBe(false);
+  });
+
+  it("patch accepts an empty object and rejects unknown keys", () => {
+    expect(goalPatchSchema.safeParse({}).success).toBe(true);
+    expect(goalPatchSchema.safeParse({ status: "achieved" }).success).toBe(true);
+    expect(goalPatchSchema.safeParse({ blockId: UUID }).success).toBe(false);
   });
 });

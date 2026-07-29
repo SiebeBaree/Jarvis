@@ -8,7 +8,6 @@ struct RecurringTasksView: View {
     @Environment(AppModel.self) private var model
 
     @State private var state: LoadState<[RecurrenceTemplateDTO]> = .idle
-    @State private var goals: [GoalDTO] = []
     @State private var categories: [TaskCategoryDTO] = []
     @State private var editing: RecurrenceTemplateDTO?
     @State private var pendingDelete: RecurrenceTemplateDTO?
@@ -56,7 +55,7 @@ struct RecurringTasksView: View {
         .background(Color.bgCanvas)
         .navigationTitle("Recurring tasks")
         .sheet(item: $editing) { template in
-            TemplateEditorSheet(template: template, goals: goals, categories: categories) {
+            TemplateEditorSheet(template: template, categories: categories) {
                 await fetch()
             }
         }
@@ -79,9 +78,6 @@ struct RecurringTasksView: View {
         }
         .task {
             await fetch()
-            if let response = try? await model.api.goals() {
-                goals = response.goals
-            }
             if let response = try? await model.api.taskCategories() {
                 categories = response.categories
             }
@@ -211,17 +207,14 @@ private struct TemplateEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let template: RecurrenceTemplateDTO
-    let goals: [GoalDTO]
     let categories: [TaskCategoryDTO]
     var onSaved: () async -> Void
 
     @State private var title = ""
     @State private var priority: TaskPriority = .medium
-    @State private var goalId: String?
     @State private var categoryId: String?
     @State private var hasTime = false
     @State private var dueTime: Date = .now
-    @State private var showInReviewWeek = false
     @State private var rule = RecurrenceRuleDTO(freq: "daily", interval: 1)
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -248,19 +241,10 @@ private struct TemplateEditorSheet: View {
                         }
                     }
 
-                    Picker("Goal", selection: $goalId) {
-                        Text("None").tag(String?.none)
-                        ForEach(goals) { goal in
-                            Text(goal.title).tag(Optional(goal.id))
-                        }
-                    }
-
                     Toggle("Time", isOn: $hasTime)
                     if hasTime {
                         DatePicker("At", selection: $dueTime, displayedComponents: .hourAndMinute)
                     }
-
-                    Toggle("Show during review week", isOn: $showInReviewWeek)
                 }
 
                 Section {
@@ -294,9 +278,7 @@ private struct TemplateEditorSheet: View {
             .onAppear {
                 title = template.title
                 priority = template.priority
-                goalId = template.goalId
                 categoryId = template.categoryId
-                showInReviewWeek = template.showInReviewWeek ?? false
                 rule = template.rule
                 if let time = template.dueTime {
                     hasTime = true
@@ -324,10 +306,8 @@ private struct TemplateEditorSheet: View {
                 var patch: JSONObject = [
                     "title": .string(trimmed),
                     "priority": .string(priority.rawValue),
-                    "goalId": goalId.map { .string($0) } ?? .null,
                     "categoryId": categoryId.map { .string($0) } ?? .null,
                     "rule": rule.jsonValue,
-                    "showInReviewWeek": .bool(showInReviewWeek),
                 ]
                 if hasTime {
                     let components = Calendar.current.dateComponents([.hour, .minute], from: dueTime)
