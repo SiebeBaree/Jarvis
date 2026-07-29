@@ -76,15 +76,14 @@ struct TodayView: View {
         .task {
             store.configure(model)
             await store.load()
+            store.prefetchReachableDays()
         }
         .onChange(of: model.dataRevision) {
             Task {
                 await store.load()
                 // Past pages are memory-only, so a landed write has to push
                 // them explicitly or they keep showing pre-write numbers.
-                for dayKey in store.reachableDayKeys.dropFirst() where store.payload(for: dayKey) != nil {
-                    await store.loadPast(dayKey, force: true)
-                }
+                store.prefetchReachableDays(force: true)
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -111,21 +110,60 @@ struct TodayView: View {
     private var pager: some View {
         VStack(spacing: 0) {
             dayPicker
-            TabView(selection: Binding(get: { visibleDayKey ?? "" }, set: { selectedDay = $0 })) {
-                ForEach(store.reachableDayKeys, id: \.self) { dayKey in
-                    dayPage(dayKey)
-                        .tag(dayKey)
-                }
-            }
-            #if os(iOS)
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #endif
+            pages
         }
         .onChange(of: visibleDayKey) { _, dayKey in
             guard let dayKey else { return }
             Task { await store.loadPast(dayKey) }
         }
     }
+
+    @ViewBuilder
+    private var pages: some View {
+        #if os(iOS)
+        // Swiping between days is the native gesture on a phone.
+        TabView(selection: Binding(get: { visibleDayKey ?? "" }, set: { selectedDay = $0 })) {
+            ForEach(store.reachableDayKeys, id: \.self) { dayKey in
+                dayPage(dayKey)
+                    .tag(dayKey)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        #else
+        // A Mac has no swipe-between-pages idiom, and TabView without the page
+        // style draws an actual tab bar — a row of unlabelled buttons under the
+        // day strip that already does this job. So: render the selected day,
+        // switch it from the strip or ⌘←/⌘→.
+        if let dayKey = visibleDayKey {
+            dayPage(dayKey)
+                .id(dayKey)
+                .transition(.opacity)
+                .background(dayShortcuts)
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    /// ⌘← / ⌘→ step through the reachable days.
+    private var dayShortcuts: some View {
+        Group {
+            Button("Previous day") { step(-1) }
+                .keyboardShortcut(.leftArrow, modifiers: .command)
+            Button("Next day") { step(1) }
+                .keyboardShortcut(.rightArrow, modifiers: .command)
+        }
+        .hidden()
+    }
+
+    /// `direction` is in calendar terms: -1 goes back in time.
+    private func step(_ direction: Int) {
+        let days = store.reachableDayKeys // today first, oldest last
+        guard let current = visibleDayKey, let index = days.firstIndex(of: current) else { return }
+        let next = index - direction
+        guard days.indices.contains(next) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { selectedDay = days[next] }
+    }
+    #endif
 
     /// Segmented day strip above the pages. It doubles as the affordance —
     /// a horizontal swipe is invisible until something tells you it exists.

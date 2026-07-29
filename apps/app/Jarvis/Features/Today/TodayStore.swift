@@ -102,6 +102,16 @@ final class TodayStore {
         }
     }
 
+    /// Warms the three back-days concurrently. The day strip shows each day's
+    /// score, and a strip of "—" reads as broken rather than as "not fetched
+    /// yet" — so they are pulled as soon as today lands, not on navigation.
+    /// Fire-and-forget: nothing on screen is waiting for them.
+    func prefetchReachableDays(force: Bool = false) {
+        for dayKey in reachableDayKeys.dropFirst() {
+            Task { await loadPast(dayKey, force: force) }
+        }
+    }
+
     /// Fetches one of the three past days the pager can reach. Past payloads
     /// are memory-only: they are cheap to refetch and never the first thing
     /// on screen at launch.
