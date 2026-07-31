@@ -34,6 +34,9 @@ struct TasksView: View {
             Group {
                 controlsRow
                 categoryChips
+                // Always there, above the tasks — adding one is typing, not
+                // opening something first.
+                quickAdd
                 if let actionError = store.actionError {
                     inlineError(actionError)
                 }
@@ -64,12 +67,6 @@ struct TasksView: View {
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
-        }
-        // The composer lives at the bottom edge, always one tap (or ⌘N) away
-        // and never scrolled off — and it keeps the List owning the top edge,
-        // which is what keeps the macOS toolbar band transparent.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            quickAddBar
         }
         .sheet(item: $editorDraft) { draft in
             TaskEditorView(draft: draft) { request in
@@ -165,28 +162,16 @@ struct TasksView: View {
         return draft
     }
 
-    private var quickAddBar: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.borderHairline)
-                .frame(height: 0.5)
-            QuickAddComposer(
-                todayKey: store.todayKey,
-                categories: store.categories,
-                defaults: composerDefaults,
-                isActive: $composerActive,
-                onCreate: { store.create($0) },
-                onCreateCategory: { await store.createCategory(name: $0) },
-                onOpenEditor: { editorDraft = $0 },
-            )
-            .padding(.horizontal, PageMargin.standard)
-            .padding(.vertical, Space.xs)
-            #if os(macOS)
-            .frame(maxWidth: 760)
-            #endif
-            .frame(maxWidth: .infinity)
-        }
-        .background(Color.bgSurface)
+    private var quickAdd: some View {
+        QuickAddComposer(
+            todayKey: store.todayKey,
+            categories: store.categories,
+            defaults: composerDefaults,
+            isActive: $composerActive,
+            onCreate: { store.create($0) },
+            onCreateCategory: { await store.createCategory(name: $0) },
+            onOpenEditor: { editorDraft = $0 },
+        )
     }
 
     #if os(macOS)

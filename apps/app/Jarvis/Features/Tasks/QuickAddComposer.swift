@@ -34,8 +34,8 @@ struct QuickAddComposer: View {
     /// category filter) rather than a blank slate.
     var defaults: TaskDraft = TaskDraft()
     var placeholder: String = "Add a task"
-    var collapsedTitle: String = "Add task"
-    /// Collapsed ⇄ composing. A binding so the toolbar + and ⌘N can open it.
+    /// Mirrors the field's focus, both ways: the toolbar + and ⌘N set it to
+    /// put the cursor in the field, and the field clears it when you leave.
     @Binding var isActive: Bool
     var onCreate: (TaskCreateRequest) -> Void
     var onCreateCategory: (String) async -> TaskCategoryDTO?
@@ -58,44 +58,31 @@ struct QuickAddComposer: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The chips are the part that costs vertical space, so they only unfold
+    /// once you are actually writing something.
+    private var isEngaged: Bool { focused || !text.isEmpty }
+
     var body: some View {
-        Group {
-            if isActive {
-                composer
-            } else {
-                collapsedButton
+        composer
+            .onChange(of: isActive) { _, active in
+                if focused != active { focused = active }
             }
-        }
-        .onChange(of: isActive, initial: true) { _, active in
-            if active { begin() }
-        }
-        .alert("New category", isPresented: $showNewCategory) {
-            TextField("Name", text: $newCategoryName)
-            Button("Create") { createCategory() }
-            Button("Cancel", role: .cancel) { newCategoryName = "" }
-        } message: {
-            Text("e.g. Work, Personal, Household")
-        }
-    }
-
-    // MARK: - Collapsed
-
-    private var collapsedButton: some View {
-        Button {
-            isActive = true
-        } label: {
-            HStack(spacing: Space.sm) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .medium))
-                Text(collapsedTitle)
-                    .font(.headlineJ)
-                Spacer(minLength: 0)
+            .onChange(of: focused) { _, isFocused in
+                if isActive != isFocused { isActive = isFocused }
+                // Leaving an untouched field resets the chips, so the next
+                // task starts from the screen's context again.
+                if !isFocused, text.isEmpty { draft = defaults }
             }
-            .foregroundStyle(Color.accentPrimary)
-            .frame(minHeight: RowHeight.standard)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+            .onAppear {
+                if text.isEmpty { draft = defaults }
+            }
+            .alert("New category", isPresented: $showNewCategory) {
+                TextField("Name", text: $newCategoryName)
+                Button("Create") { createCategory() }
+                Button("Cancel", role: .cancel) { newCategoryName = "" }
+            } message: {
+                Text("e.g. Work, Personal, Household")
+            }
     }
 
     // MARK: - Composing
@@ -103,9 +90,10 @@ struct QuickAddComposer: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             HStack(spacing: Space.md) {
-                Image(systemName: "circle")
-                    .font(.system(size: 22, weight: .light))
-                    .foregroundStyle(Color.textTertiary)
+                Image(systemName: isEngaged ? "circle" : "plus")
+                    .font(.system(size: isEngaged ? 22 : 15, weight: isEngaged ? .light : .medium))
+                    .foregroundStyle(isEngaged ? Color.textTertiary : Color.accentPrimary)
+                    .frame(width: 22)
 
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
@@ -118,51 +106,57 @@ struct QuickAddComposer: View {
                     .submitLabel(.done)
                     #endif
 
-                Button(action: submit) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(trimmedTitle.isEmpty ? Color.textTertiary : Color.accentPrimary)
-                }
-                .buttonStyle(.plain)
-                .disabled(trimmedTitle.isEmpty)
-                .accessibilityLabel("Add task")
-            }
-
-            HStack(spacing: Space.sm) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: Space.sm) {
-                        dateChip
-                        priorityChip
-                        categoryChip
+                if !trimmedTitle.isEmpty {
+                    Button(action: submit) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Color.accentPrimary)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add task")
                 }
-                .scrollIndicators(.hidden)
-
-                // Icons, not words: on an iPhone the chip row is already
-                // competing for the width.
-                Button {
-                    openEditor()
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.textSecondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("More options")
-
-                Button {
-                    close()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.textTertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close")
             }
-            .padding(.leading, 22 + Space.md)
+            .frame(minHeight: RowHeight.standard)
+
+            if isEngaged {
+                HStack(spacing: Space.sm) {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: Space.sm) {
+                            dateChip
+                            priorityChip
+                            categoryChip
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+
+                    // Icons, not words: on an iPhone the chip row is already
+                    // competing for the width.
+                    Button {
+                        openEditor()
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("More options")
+
+                    Button {
+                        close()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+                }
+                .padding(.leading, 22 + Space.md)
+                .padding(.bottom, Space.xs)
+                .transition(.opacity)
+            }
         }
-        .padding(.vertical, Space.xs)
+        .animation(.easeOut(duration: 0.12), value: isEngaged)
         #if os(macOS)
         .onExitCommand { close() }
         #endif
@@ -285,17 +279,12 @@ struct QuickAddComposer: View {
 
     // MARK: - Actions
 
-    private func begin() {
+    /// Back to an empty, unfocused field — the chips fold away with it.
+    private func close() {
         text = ""
         draft = defaults
         lastParse = QuickAddParse()
-        focused = true
-    }
-
-    private func close() {
-        text = ""
         focused = false
-        isActive = false
     }
 
     private func setDue(_ dayKey: DayKey) {
