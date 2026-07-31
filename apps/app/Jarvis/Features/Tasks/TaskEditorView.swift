@@ -2,15 +2,17 @@ import DesignSystem
 import JarvisAPI
 import SwiftUI
 
-/// New-task sheet. With "Repeat" on it creates a recurrence template
-/// (startDate = the chosen due date) instead of a one-off task.
+/// The full task form — notes, repeat, an explicit date picker. It is now the
+/// escape hatch behind quick-add's "More…", not the way tasks normally get
+/// created, so it always opens prefilled with whatever was already typed.
+/// With "Repeat" on it creates a recurrence template (startDate = the chosen
+/// due date) instead of a one-off task.
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    let defaultDueDate: String
-    /// Prefills the title field (quick-add "More…" hands off the typed text).
-    var initialTitle: String? = nil
+    /// Everything quick-add had when "More…" was tapped.
+    let draft: TaskDraft
     /// Receives the fully-formed create request (with its client-generated
     /// id) so the calling list can show the row before it is sent.
     var onCreate: (TaskCreateRequest) -> Void
@@ -22,7 +24,6 @@ struct TaskEditorView: View {
     @State private var hasTime = false
     @State private var dueTime: Date = .now
     @State private var priority: TaskPriority = .medium
-    @State private var categories: [TaskCategoryDTO] = []
     @State private var categoryId: String?
     @State private var showNewCategoryAlert = false
     @State private var newCategoryName = ""
@@ -30,6 +31,8 @@ struct TaskEditorView: View {
     @State private var rule = RecurrenceRuleDTO(freq: "daily", interval: 1)
 
     @FocusState private var titleFocused: Bool
+
+    private var categories: [TaskCategoryDTO] { model.categories }
 
     var body: some View {
         NavigationStack {
@@ -110,20 +113,9 @@ struct TaskEditorView: View {
                 // A template always needs a start date.
                 if isOn { hasDueDate = true }
             }
-            .onAppear {
-                if let initialTitle, !initialTitle.isEmpty {
-                    title = initialTitle
-                }
-                if let date = DayKeyMath.date(from: defaultDueDate) {
-                    dueDate = date
-                }
-                dueTime = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
-                titleFocused = true
-            }
+            .onAppear { applyDraft() }
             .task {
-                if let response = try? await model.api.taskCategories() {
-                    categories = response.categories
-                }
+                await model.loadCategories()
             }
             .alert("New category", isPresented: $showNewCategoryAlert) {
                 TextField("Name", text: $newCategoryName)
@@ -138,6 +130,19 @@ struct TaskEditorView: View {
         #endif
     }
 
+    private func applyDraft() {
+        title = draft.title
+        priority = draft.priority
+        categoryId = draft.categoryId
+        hasDueDate = draft.dueDate != nil
+        if let date = draft.dueDate.flatMap({ DayKeyMath.date(from: $0) }) {
+            dueDate = date
+        }
+        hasTime = draft.dueTime != nil
+        dueTime = Self.date(fromTime: draft.dueTime ?? "09:00")
+        titleFocused = title.isEmpty
+    }
+
     private func categoryLabel(_ category: TaskCategoryDTO) -> String {
         if let emoji = category.emoji, !emoji.isEmpty {
             return "\(emoji) \(category.name)"
@@ -146,19 +151,12 @@ struct TaskEditorView: View {
     }
 
     private func createCategory() {
-        let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = newCategoryName
         newCategoryName = ""
-        guard !trimmed.isEmpty else { return }
         Task {
-            guard let created = try? await model.api.createTaskCategory(
-                TaskCategoryCreateRequest(
-                    name: trimmed,
-                    colorHex: CategoryPalette.next(after: categories.count),
-                ),
-            ) else { return }
-            categories.append(created)
-            categoryId = created.id
-            model.invalidate([.category])
+            if let created = await model.createCategory(name: trimmed) {
+                categoryId = created.id
+            }
         }
     }
 
@@ -235,5 +233,13 @@ struct TaskEditorView: View {
     private static func timeString(from date: Date) -> String {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+    }
+
+    private static func date(fromTime string: String) -> Date {
+        let parts = string.split(separator: ":").compactMap { Int($0) }
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: .now)
+        components.hour = parts.first ?? 9
+        components.minute = parts.count > 1 ? parts[1] : 0
+        return Calendar.current.date(from: components) ?? .now
     }
 }

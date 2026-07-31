@@ -195,21 +195,6 @@ final class TodayStore {
         )
     }
 
-    /// The quick-add composer.
-    func createQuickTask(title: String, dueDate: String?, priority: TaskPriority, categoryId: String? = nil) {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        createTask(
-            TaskCreateRequest(
-                id: UUID().uuidString,
-                title: trimmed,
-                dueDate: dueDate,
-                priority: priority,
-                categoryId: categoryId,
-            ),
-        )
-    }
-
     /// Creates a task with a client-generated id, so the row appears with the
     /// id it will keep on the server — immediately completable, and safe for
     /// the queue to replay.

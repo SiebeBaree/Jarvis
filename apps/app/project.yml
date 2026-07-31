@@ -62,3 +62,22 @@ targets:
       - JarvisTests
     dependencies:
       - target: Jarvis
+    settings:
+      base:
+        # The bundle has no Info.plist of its own; without this, signing the
+        # test bundle for the simulator fails.
+        GENERATE_INFOPLIST_FILE: YES
+
+# Explicit scheme so `xcodebuild test` has a test action to run — the implicit
+# target schemes only know how to build.
+schemes:
+  Jarvis:
+    build:
+      targets:
+        Jarvis: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - JarvisTests

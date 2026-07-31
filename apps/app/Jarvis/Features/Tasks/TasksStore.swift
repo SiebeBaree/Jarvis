@@ -47,7 +47,9 @@ final class TasksStore {
     private(set) var state: LoadState<[TaskDTO]> = .idle
     /// Open tasks without a due date (view "inbox"), merged into Upcoming.
     private(set) var noDateTasks: [TaskDTO] = []
-    private(set) var categories: [TaskCategoryDTO] = []
+    /// Categories live on AppModel — one cached list shared with Today's
+    /// composer, so opening quick-add never waits on a fetch.
+    var categories: [TaskCategoryDTO] { model?.categories ?? [] }
     /// Every task seen in any fetch, so the detail screen can start instantly.
     private(set) var cache: [String: TaskDTO] = [:]
 
@@ -135,36 +137,21 @@ final class TasksStore {
     }
 
     func fetchCategories(force: Bool = false) async {
-        guard let model else { return }
-        if !force, let cached = model.store.read([TaskCategoryDTO].self, .taskCategories) {
-            categories = cached.value
-            if cached.isFresh { return }
-        }
-        if let response = try? await model.api.taskCategories() {
-            categories = response.categories
-            model.store.write(response.categories, .taskCategories)
-        }
+        await model?.loadCategories(force: force)
     }
 
     // MARK: - Category CRUD
 
     @discardableResult
     func createCategory(name: String) async -> TaskCategoryDTO? {
-        guard let model else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        do {
-            let created = try await model.api.createTaskCategory(
-                TaskCategoryCreateRequest(name: trimmed, colorHex: CategoryPalette.next(after: categories.count)),
-            )
-            actionError = nil
-            await fetchCategories(force: true)
-            return created
-        } catch {
-            model.handle(error)
-            actionError = error.localizedDescription
+        guard let created = await model?.createCategory(name: trimmed) else {
+            actionError = "Could not create that category."
             return nil
         }
+        actionError = nil
+        return created
     }
 
     func renameCategory(_ category: TaskCategoryDTO, to name: String) async {

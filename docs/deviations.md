@@ -256,3 +256,15 @@ describes the old design.
   and by holding revalidation until the outbox has actually drained (bounded,
   so an offline queue can't wedge it). Habit stats no longer blank out on
   mutation either; the stale value stays until its replacement arrives.
+- **Task creation is inline everywhere, TickTick-style.** The Tasks tab used to
+  create tasks through a modal form sheet: tap +, wait for the sheet, fill a
+  `Form`, tap Save, wait for the dismissal — and the sheet fetched the category
+  list over the network on every open. It now has the same one-line composer
+  Today has, pinned to the bottom edge (⌘N or + focuses it), with date,
+  priority and category chips and a live natural-language parser: typing
+  "gym tomorrow 7pm !1 #health" fills all four chips and saves the title as
+  "gym". Return creates the task and keeps the composer open with the same
+  chips, so adding ten things is ten returns. Categories moved to a single
+  cached list on `AppModel`, so no add path waits on a fetch. `TaskEditorView`
+  is still there for notes and repeats, but it is now the "More…" escape hatch
+  and always opens prefilled with what was already typed.

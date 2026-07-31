@@ -93,6 +93,22 @@ public struct TaskCategoryDTO: Codable, Sendable, Identifiable, Equatable {
     public let colorHex: String?
     public let sortOrder: Int
     public let archivedAt: String?
+
+    public init(
+        id: String,
+        name: String,
+        emoji: String? = nil,
+        colorHex: String? = nil,
+        sortOrder: Int = 0,
+        archivedAt: String? = nil,
+    ) {
+        self.id = id
+        self.name = name
+        self.emoji = emoji
+        self.colorHex = colorHex
+        self.sortOrder = sortOrder
+        self.archivedAt = archivedAt
+    }
 }
 
 public struct TaskCategoryListResponse: Codable, Sendable {

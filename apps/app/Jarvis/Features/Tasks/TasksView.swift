@@ -14,7 +14,10 @@ private struct TaskRoute: Identifiable, Hashable {
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var store = TasksStore()
-    @State private var showingEditor = false
+    /// Quick-add composer state: collapsed pill ⇄ open composer.
+    @State private var composerActive = false
+    /// Non-nil while the full editor is up, carrying what quick-add had typed.
+    @State private var editorDraft: TaskDraft?
     @State private var showNewCategoryAlert = false
     @State private var newCategoryName = ""
     @State private var renameCategoryTarget: TaskCategoryDTO?
@@ -55,15 +58,21 @@ struct TasksView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    showingEditor = true
+                    composerActive = true
                 } label: {
                     Label("New task", systemImage: "plus")
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
         }
-        .sheet(isPresented: $showingEditor) {
-            TaskEditorView(defaultDueDate: store.todayKey) { request in
+        // The composer lives at the bottom edge, always one tap (or ⌘N) away
+        // and never scrolled off — and it keeps the List owning the top edge,
+        // which is what keeps the macOS toolbar band transparent.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            quickAddBar
+        }
+        .sheet(item: $editorDraft) { draft in
+            TaskEditorView(draft: draft) { request in
                 store.create(request)
             }
         }
@@ -140,6 +149,44 @@ struct TasksView: View {
         } message: { _ in
             Text("Tasks in this category are kept — they just lose the category.")
         }
+    }
+
+    // MARK: - Quick add
+
+    /// A new task inherits the page you are looking at: Upcoming means
+    /// tomorrow, and a category filter means that category.
+    private var composerDefaults: TaskDraft {
+        var draft = TaskDraft()
+        draft.dueDate = switch store.segment {
+        case .today, .all, .done: store.todayKey
+        case .upcoming: DayKeyMath.addDays(store.todayKey, 1)
+        }
+        draft.categoryId = store.selectedCategoryId
+        return draft
+    }
+
+    private var quickAddBar: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.borderHairline)
+                .frame(height: 0.5)
+            QuickAddComposer(
+                todayKey: store.todayKey,
+                categories: store.categories,
+                defaults: composerDefaults,
+                isActive: $composerActive,
+                onCreate: { store.create($0) },
+                onCreateCategory: { await store.createCategory(name: $0) },
+                onOpenEditor: { editorDraft = $0 },
+            )
+            .padding(.horizontal, PageMargin.standard)
+            .padding(.vertical, Space.xs)
+            #if os(macOS)
+            .frame(maxWidth: 760)
+            #endif
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color.bgSurface)
     }
 
     #if os(macOS)
@@ -393,7 +440,7 @@ struct TasksView: View {
             Text(message)
                 .font(.bodyJ)
                 .foregroundStyle(Color.textSecondary)
-            Button("Add task") { showingEditor = true }
+            Button("Add task") { composerActive = true }
                 .buttonStyle(.jarvisGhost)
         }
         .frame(maxWidth: .infinity)

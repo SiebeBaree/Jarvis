@@ -71,6 +71,56 @@ final class AppModel {
         queue.enqueue(method: method, path: path, body: body, entities: entities, label: label)
     }
 
+    // MARK: - Task categories
+    //
+    // One shared, cached list. The quick-add chips need categories the moment
+    // the composer opens, so every screen reads them from here instead of
+    // firing its own `GET /task-categories` on appear.
+
+    private(set) var categories: [TaskCategoryDTO] = []
+    private var categoriesLoad: Task<Void, Never>?
+
+    @MainActor
+    func loadCategories(force: Bool = false) async {
+        if let cached = store.read([TaskCategoryDTO].self, .taskCategories) {
+            categories = cached.value
+            if cached.isFresh, !force { return }
+        }
+        if let inFlight = categoriesLoad {
+            await inFlight.value
+            return
+        }
+        let load = Task { [weak self] in
+            guard let self, let response = try? await api.taskCategories() else { return }
+            categories = response.categories
+            store.write(response.categories, .taskCategories)
+        }
+        categoriesLoad = load
+        await load.value
+        categoriesLoad = nil
+    }
+
+    /// Creates a category (or hands back the one that already has that name —
+    /// quick-add types names, and a near-duplicate list is worse than a reuse).
+    @MainActor
+    @discardableResult
+    func createCategory(name: String) async -> TaskCategoryDTO? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = categories.first(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return existing
+        }
+        guard let created = try? await api.createTaskCategory(
+            TaskCategoryCreateRequest(name: trimmed, colorHex: CategoryPalette.next(after: categories.count)),
+        ) else { return nil }
+        categories.append(created)
+        // Invalidate first, then write: the lists that show categories need a
+        // refetch, but this list is already correct.
+        invalidate([.category])
+        store.write(categories, .taskCategories)
+        return created
+    }
+
     /// True when a write landed since `ticket` was taken, meaning a response
     /// fetched under that ticket is already out of date.
     @MainActor
@@ -190,6 +240,7 @@ final class AppModel {
         // does not, so an expired session re-syncs after signing back in.
         queue.clear()
         store.clear()
+        categories = []
         session = .loggedOut
     }
 

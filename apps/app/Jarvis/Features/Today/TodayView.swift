@@ -17,6 +17,9 @@ struct TodayView: View {
     @State private var selectedDay: DayKey?
     @State private var showSettings = false
     @State private var showBreakdown = false
+    /// Quick-add composer state (today's page only).
+    @State private var composerActive = false
+    @State private var editorDraft: TaskDraft?
 
     var body: some View {
         Group {
@@ -73,10 +76,20 @@ struct TodayView: View {
                 ScoreBreakdownSheet(payload: payload)
             }
         }
+        .sheet(item: $editorDraft) { draft in
+            TaskEditorView(draft: draft) { request in
+                store.createTask(request)
+            }
+        }
         .task {
             store.configure(model)
             await store.load()
             store.prefetchReachableDays()
+        }
+        .task {
+            // Quick-add's category chip reads these; loading them here means
+            // the composer never has to wait on a fetch when it opens.
+            await model.loadCategories()
         }
         .onChange(of: model.dataRevision) {
             Task {
@@ -492,16 +505,15 @@ struct TodayView: View {
         }
 
         if isToday {
-            AddTaskRow(dayKey: payload.dayKey) { title, dueDate, priority, categoryId in
-                store.createQuickTask(
-                    title: title,
-                    dueDate: dueDate,
-                    priority: priority,
-                    categoryId: categoryId,
-                )
-            } onFullEditor: { request in
-                store.createTask(request)
-            }
+            QuickAddComposer(
+                todayKey: payload.dayKey,
+                categories: model.categories,
+                defaults: TaskDraft(dueDate: payload.dayKey),
+                isActive: $composerActive,
+                onCreate: { store.createTask($0) },
+                onCreateCategory: { await model.createCategory(name: $0) },
+                onOpenEditor: { editorDraft = $0 },
+            )
         }
 
         ForEach(completed) { task in
@@ -675,189 +687,6 @@ struct TodayView: View {
         .buttonStyle(.plain)
         .disabled(disabled)
         .accessibilityLabel("Log one")
-    }
-}
-
-// MARK: - Quick add
-
-/// The inline task composer. Extracted so the day pager can simply leave it
-/// out of past pages instead of threading its five pieces of state through
-/// every page.
-private struct AddTaskRow: View {
-    let dayKey: DayKey
-    let onQuickAdd: (String, String?, TaskPriority, String?) -> Void
-    let onFullEditor: (TaskCreateRequest) -> Void
-
-    @Environment(AppModel.self) private var model
-    @State private var isAdding = false
-    @State private var title = ""
-    @State private var dueChoice: QuickDueChoice = .today
-    @State private var priority: TaskPriority = .medium
-    @State private var categories: [TaskCategoryDTO] = []
-    @State private var categoryId: String?
-    @State private var showEditor = false
-    @FocusState private var focused: Bool
-
-    private enum QuickDueChoice {
-        case today, tomorrow, none
-
-        var label: String {
-            switch self {
-            case .today: "Today"
-            case .tomorrow: "Tomorrow"
-            case .none: "No date"
-            }
-        }
-    }
-
-    var body: some View {
-        content
-            .sheet(isPresented: $showEditor) {
-                TaskEditorView(
-                    defaultDueDate: dayKey,
-                    initialTitle: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                ) { request in
-                    onFullEditor(request)
-                    title = ""
-                    isAdding = false
-                }
-            }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if isAdding {
-            VStack(alignment: .leading, spacing: Space.sm) {
-                HStack(spacing: Space.md) {
-                    Image(systemName: "circle")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Color.textTertiary)
-                    TextField("Task title", text: $title)
-                        .font(.headlineJ)
-                        .textFieldStyle(.plain)
-                        .focused($focused)
-                        .onSubmit(submit)
-                    Button("Cancel") {
-                        isAdding = false
-                        title = ""
-                    }
-                    .buttonStyle(.plain)
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.textTertiary)
-                }
-                HStack(spacing: Space.sm) {
-                    dueChip
-                    priorityChip
-                    categoryChip
-                    Spacer(minLength: Space.sm)
-                    Button("More…") { showEditor = true }
-                        .buttonStyle(.jarvisGhost)
-                }
-                .padding(.leading, 22 + Space.md)
-            }
-            .frame(minHeight: RowHeight.standard)
-        } else {
-            Button {
-                isAdding = true
-                dueChoice = .today
-                priority = .medium
-                categoryId = nil
-                focused = true
-                Task {
-                    if let response = try? await model.api.taskCategories() {
-                        categories = response.categories
-                    }
-                }
-            } label: {
-                Text("+ Add task")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.jarvisGhost)
-        }
-    }
-
-    private var dueChip: some View {
-        Menu {
-            Button("Today") { dueChoice = .today }
-            Button("Tomorrow") { dueChoice = .tomorrow }
-            Button("None") { dueChoice = .none }
-        } label: {
-            HStack(spacing: Space.xs) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 10))
-                Text(dueChoice.label)
-                    .font(.captionJ)
-            }
-            .foregroundStyle(Color.textSecondary)
-            .padding(.horizontal, Space.sm)
-            .padding(.vertical, 3)
-            .background(Color.bgSubtle, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Due date: \(dueChoice.label)")
-    }
-
-    private var priorityChip: some View {
-        Menu {
-            Button("P1 High") { priority = .high }
-            Button("P2 Medium") { priority = .medium }
-            Button("P3 Low") { priority = .low }
-        } label: {
-            PriorityFlag(priority.flagLevel)
-                .padding(.horizontal, Space.sm)
-                .padding(.vertical, 3)
-                .background(Color.bgSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Priority: \(priority.flagLevel.label)")
-    }
-
-    @ViewBuilder
-    private var categoryChip: some View {
-        if !categories.isEmpty {
-            Menu {
-                Button("None") { categoryId = nil }
-                ForEach(categories) { category in
-                    Button(category.name) { categoryId = category.id }
-                }
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Image(systemName: "tag")
-                        .font(.system(size: 10))
-                    Text(categories.first(where: { $0.id == categoryId })?.name ?? "Category")
-                        .font(.captionJ)
-                }
-                .foregroundStyle(categoryId == nil ? Color.textSecondary : Color.accentPrimary)
-                .padding(.horizontal, Space.sm)
-                .padding(.vertical, 3)
-                .background(categoryId == nil ? Color.bgSubtle : Color.accentSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel(
-                "Category: \(categories.first(where: { $0.id == categoryId })?.name ?? "none")",
-            )
-        }
-    }
-
-    private func submit() {
-        let dueDate: String? = switch dueChoice {
-        case .today: dayKey
-        case .tomorrow: DayKeyMath.addDays(dayKey, 1)
-        case .none: nil
-        }
-        let submitted = title
-        title = ""
-        isAdding = false
-        onQuickAdd(submitted, dueDate, priority, categoryId)
     }
 }
 
