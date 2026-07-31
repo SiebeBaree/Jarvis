@@ -121,9 +121,20 @@ struct TodayView: View {
     }
 
     private var pager: some View {
-        VStack(spacing: 0) {
-            dayPicker
+        Group {
+            #if os(iOS)
+            // The strip is the stable frame the pages swipe behind, so on a
+            // phone it stays put above them. (No toolbar band to worry about
+            // here — that is a macOS problem, handled in `dayContent`.)
+            VStack(spacing: 0) {
+                dayStrip
+                    .padding(.horizontal, PageMargin.standard)
+                    .padding(.bottom, Space.sm)
+                pages
+            }
+            #else
             pages
+            #endif
         }
         .onChange(of: visibleDayKey) { _, dayKey in
             guard let dayKey else { return }
@@ -178,49 +189,72 @@ struct TodayView: View {
     }
     #endif
 
-    /// Segmented day strip above the pages. It doubles as the affordance —
-    /// a horizontal swipe is invisible until something tells you it exists.
-    private var dayPicker: some View {
+    /// Day strip. It is the FIRST ROW OF THE PAGE, not a bar above it: fixed
+    /// content at the top edge makes the macOS window toolbar paint its
+    /// permanent opaque band, and four full-width two-line buttons were a lot
+    /// of chrome to carry on a screen you open twenty times a day. Four small
+    /// capsules instead — day, score, and an amber dot on a day still missing
+    /// its feel score, which is the entire reason you would go back at all.
+    private var dayStrip: some View {
         HStack(spacing: Space.xs) {
             ForEach(store.reachableDayKeys.reversed(), id: \.self) { dayKey in
-                let isSelected = dayKey == visibleDayKey
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { selectedDay = dayKey }
-                } label: {
-                    VStack(spacing: 1) {
-                        Text(dayLabel(dayKey))
-                            .font(.captionJ)
-                        Text(scoreLabel(dayKey))
-                            .font(.monoJ)
-                            .monospacedDigit()
-                    }
-                    .foregroundStyle(isSelected ? Color.textPrimary : Color.textTertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Space.xs)
-                    .background(
-                        isSelected ? Color.bgSurface : Color.clear,
-                        in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous),
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                            .strokeBorder(isSelected ? Color.borderHairline : .clear, lineWidth: 0.5),
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(dayLabel(dayKey)), score \(scoreLabel(dayKey))")
-                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                dayCapsule(dayKey)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, PageMargin.standard)
-        .padding(.bottom, Space.xs)
     }
 
+    private func dayCapsule(_ dayKey: DayKey) -> some View {
+        let isSelected = dayKey == visibleDayKey
+        let isToday = dayKey == store.payload?.dayKey
+        // Today is unrated until the evening — a warning dot on it all day
+        // would just be wallpaper.
+        let needsRating = !isToday && store.payload(for: dayKey).map { $0.mood == nil } == true
+
+        return Button {
+            withAnimation(.easeOut(duration: 0.2)) { selectedDay = dayKey }
+        } label: {
+            HStack(spacing: Space.xs) {
+                Text(dayLabel(dayKey))
+                    .font(.captionJ)
+                    .foregroundStyle(isSelected ? Color.textPrimary : Color.textTertiary)
+                Text(scoreLabel(dayKey))
+                    .font(.monoJ)
+                    .monospacedDigit()
+                    .foregroundStyle(isSelected ? Color.textSecondary : Color.textTertiary)
+                if needsRating {
+                    Circle()
+                        .fill(Color.warning)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .padding(.horizontal, Space.sm)
+            .padding(.vertical, 4)
+            .background(
+                isSelected ? Color.bgSurface : Color.clear,
+                in: Capsule(),
+            )
+            .overlay(
+                Capsule().strokeBorder(isSelected ? Color.borderHairline : .clear, lineWidth: 0.5),
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "\(dayLabel(dayKey)), score \(scoreLabel(dayKey))\(needsRating ? ", not rated" : "")",
+        )
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// Short enough for a capsule: "Today", "Yest", "Sun".
     private func dayLabel(_ dayKey: DayKey) -> String {
         guard let today = store.payload?.dayKey else { return dayKey }
         let label = DayKeyMath.relativeLabel(for: dayKey, today: today)
-        // Weekday names are too wide for a four-up strip on an iPhone.
-        return label.count > 9 ? String(label.prefix(3)) : label
+        switch label {
+        case "Today": return label
+        case "Yesterday": return "Yest"
+        default: return String(label.prefix(3))
+        }
     }
 
     private func scoreLabel(_ dayKey: DayKey) -> String {
@@ -247,6 +281,11 @@ struct TodayView: View {
     private func dayContent(_ payload: DayPayload, isToday: Bool) -> some View {
         List {
             Group {
+                #if os(macOS)
+                // Inside the List, because fixed content at the top edge makes
+                // the window toolbar paint its permanent opaque band.
+                dayStrip
+                #endif
                 dateHeader(payload, isToday: isToday)
                 if let error = store.mutationError, isToday {
                     errorBanner(error)

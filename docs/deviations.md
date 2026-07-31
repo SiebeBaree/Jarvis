@@ -268,3 +268,12 @@ describes the old design.
   cached list on `AppModel`, so no add path waits on a fetch. `TaskEditorView`
   is still there for notes and repeats, but it is now the "More…" escape hatch
   and always opens prefilled with what was already typed.
+- **The Today day strip is a light capsule row, not a segmented control.**
+  Four full-width two-line buttons (day over score) sat in a fixed bar above
+  the pages. That bar was also fixed content at the top edge, which is exactly
+  what makes the macOS window toolbar paint its permanent opaque band. It is
+  now four small single-line capsules ("Today 72") aligned left, and a day
+  still missing its feel score carries an amber dot — the one thing that makes
+  going back worth doing. On macOS the strip moved inside the List as its
+  first row (toolbar stays transparent); on iPhone it stays fixed above the
+  pager, since it is the stable frame the pages swipe behind.
