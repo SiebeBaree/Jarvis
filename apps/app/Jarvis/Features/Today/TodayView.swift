@@ -17,6 +17,9 @@ struct TodayView: View {
     @State private var store = TodayStore()
     @State private var selectedDay: DayKey?
     @State private var showBreakdown = false
+    /// Tapping a habit on Today opens its detail. It used to do nothing here,
+    /// so seeing a streak meant leaving for the Habits tab and finding it again.
+    @State private var habitRoute: HabitDetailRoute?
     /// Quick-add composer state (today's page only).
     @State private var composerActive = false
     @State private var editorDraft: TaskDraft?
@@ -34,6 +37,11 @@ struct TodayView: View {
         }
         .background(Color.bgCanvas)
         .navigationTitle("Today")
+        #if os(iOS)
+        // A large title spent ~90pt restating what the tab bar already says,
+        // on the one screen where vertical space is the scarce resource.
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             // Settings lives in the sidebar on macOS; only iPhone needs the
             // gear. Trends, Body and Improve used to hang off this toolbar as
@@ -58,6 +66,9 @@ struct TodayView: View {
             TaskEditorView(draft: draft) { request in
                 store.createTask(request)
             }
+        }
+        .navigationDestination(item: $habitRoute) { route in
+            HabitDetailView(habitId: route.habitId)
         }
         .task {
             store.configure(model)
@@ -108,6 +119,11 @@ struct TodayView: View {
                 dayStrip
                     .padding(.horizontal, PageMargin.standard)
                     .padding(.bottom, Space.sm)
+                    // Opaque, or the page scrolling underneath shows straight
+                    // through the strip and section titles appear to pass
+                    // behind the pills.
+                    .background(Color.bgCanvas)
+                    .zIndex(1)
                 pages
             }
             #else
@@ -190,34 +206,35 @@ struct TodayView: View {
         let needsRating = !isToday && store.payload(for: dayKey).map { $0.mood == nil } == true
 
         return Button {
-            withAnimation(.easeOut(duration: 0.2)) { selectedDay = dayKey }
+            Haptics.play(.light)
+            withJarvisAnimation(Motion.quick) { selectedDay = dayKey }
         } label: {
-            HStack(spacing: Space.xs) {
+            HStack(spacing: 5) {
                 Text(dayLabel(dayKey))
                     .font(.captionJ)
                     .foregroundStyle(isSelected ? Color.textPrimary : Color.textTertiary)
                 Text(scoreLabel(dayKey))
                     .font(.monoJ)
-                    .monospacedDigit()
-                    .foregroundStyle(isSelected ? Color.textSecondary : Color.textTertiary)
+                    .foregroundStyle(isSelected ? Color.accentPrimary : Color.textTertiary)
                 if needsRating {
                     Circle()
                         .fill(Color.warning)
                         .frame(width: 5, height: 5)
                 }
             }
-            .padding(.horizontal, Space.sm)
-            .padding(.vertical, 4)
-            .background(
-                isSelected ? Color.bgSurface : Color.clear,
-                in: Capsule(),
-            )
-            .overlay(
-                Capsule().strokeBorder(isSelected ? Color.borderHairline : .clear, lineWidth: 0.5),
-            )
+            .padding(.horizontal, Space.md)
+            .padding(.vertical, 6)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(Color.bgSurface)
+                        .jarvisShadow(.card)
+                }
+            }
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .jarvisAnimation(Motion.quick, value: isSelected)
         .accessibilityLabel(
             "\(dayLabel(dayKey)), score \(scoreLabel(dayKey))\(needsRating ? ", not rated" : "")",
         )
@@ -264,11 +281,10 @@ struct TodayView: View {
                 // the window toolbar paint its permanent opaque band.
                 dayStrip
                 #endif
-                dateHeader(payload, isToday: isToday)
                 if let error = store.mutationError, isToday {
                     errorBanner(error)
                 }
-                scoreHeader(payload)
+                scoreHeader(payload, isToday: isToday)
                 MoodCard(
                     dayKey: payload.dayKey,
                     mood: payload.mood,
@@ -286,15 +302,16 @@ struct TodayView: View {
                 overdueSection(payload)
                 tasksSection(payload, isToday: isToday)
                 habitsSection(payload, isToday: isToday)
+                Color.clear.frame(height: Space.xxxl)
             }
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(
-                top: Space.xs, leading: PageMargin.standard,
-                bottom: Space.xs, trailing: PageMargin.standard,
+                top: 3, leading: PageMargin.standard,
+                bottom: 3, trailing: PageMargin.standard,
             ))
             #if os(macOS)
-            .frame(maxWidth: 760)
+            .frame(maxWidth: PageMargin.contentMaxWidth)
             .frame(maxWidth: .infinity)
             #endif
         }
@@ -343,87 +360,94 @@ struct TodayView: View {
         .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     }
 
-    // MARK: - Date header
-
-    private func dateHeader(_ payload: DayPayload, isToday: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(DayKeyMath.longLabel(for: payload.dayKey))
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
-            if isToday, DayKeyMath.isLateNight() {
-                Text("Late night — still counts for \(weekdayName(payload.dayKey))")
-                    .font(.captionJ)
-                    .foregroundStyle(Color.textTertiary)
-            }
-            if !isToday {
-                Text("Catching up — the feel score and habits are still editable.")
-                    .font(.captionJ)
-                    .foregroundStyle(Color.textTertiary)
-            }
-        }
-    }
-
     private func weekdayName(_ dayKey: String) -> String {
         guard let date = DayKeyMath.date(from: dayKey) else { return "today" }
         return date.formatted(.dateTime.weekday(.wide))
     }
 
-    // MARK: - Score header
+    /// "Sat 8 Aug" — short enough to live inside the ring.
+    private func ringCaption(_ dayKey: DayKey, isToday: Bool) -> String {
+        guard let date = DayKeyMath.date(from: dayKey) else { return dayKey }
+        return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
+    // MARK: - Score card
 
     private var weights: (tasks: Double, habits: Double, feel: Double) {
         guard let w = model.settings?.scoreWeights else { return (40, 40, 20) }
         return (w.tasks, w.habits, w.feel)
     }
 
-    private func scoreHeader(_ payload: DayPayload) -> some View {
+    /// Ring plus the three component bars. The date lives inside the ring
+    /// rather than on a line of its own above the card — a whole row spent on
+    /// "Saturday, August 8" is a row not spent on the day's actual contents.
+    private func scoreHeader(_ payload: DayPayload, isToday: Bool) -> some View {
         let score = payload.score
         let w = weights
         let feelFill = score.feelPoints.map { $0 / max(w.feel, 1) }
 
-        return HStack(spacing: Space.xl) {
-            ScoreRing(size: 120, total: score.total)
-            VStack(alignment: .leading, spacing: Space.md) {
-                componentRow(label: "Tasks", points: score.taskPoints, weight: w.tasks, color: .accentPrimary)
-                componentRow(label: "Habits", points: score.habitPoints, weight: w.habits, color: .success)
-                componentRow(
-                    label: "Feel",
-                    points: score.feelPoints,
-                    weight: w.feel,
-                    color: .warning.mix(with: .success, by: feelFill ?? 0),
+        return VStack(alignment: .leading, spacing: Space.md) {
+            HStack(spacing: Space.lg) {
+                ScoreRing(
+                    size: 116,
+                    total: score.total,
+                    caption: ringCaption(payload.dayKey, isToday: isToday),
                 )
+                VStack(alignment: .leading, spacing: Space.md) {
+                    ComponentBar(
+                        label: "Tasks",
+                        points: score.taskPoints,
+                        weight: w.tasks,
+                        tint: .accentPrimary,
+                    )
+                    ComponentBar(
+                        label: "Habits",
+                        points: score.habitPoints,
+                        weight: w.habits,
+                        tint: .success,
+                    )
+                    ComponentBar(
+                        label: "Feel",
+                        points: score.feelPoints,
+                        weight: w.feel,
+                        tint: .warning.mix(with: .success, by: feelFill ?? 0),
+                    )
+                }
             }
+            contextCaption(payload, isToday: isToday)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .jarvisCard()
-        .contentShape(Rectangle())
-        .onTapGesture { showBreakdown = true }
+        .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .pressable(scale: 0.985) { showBreakdown = true }
         .accessibilityAddTraits(.isButton)
         .accessibilityHint(Text("Shows the score breakdown"))
     }
 
-    private func componentRow(label: String, points: Double?, weight: Double, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(label)
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.textSecondary)
-                Spacer(minLength: Space.sm)
-                Text(points.map { "\(Self.formatPoints($0))/\(Self.formatPoints(weight))" } ?? "—")
-                    .font(.monoJ)
-                    .foregroundStyle(Color.textPrimary)
-            }
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.bgSubtle)
-                    if let points, weight > 0 {
-                        Capsule()
-                            .fill(color)
-                            .frame(width: proxy.size.width * min(max(points / weight, 0), 1))
-                    }
-                }
-            }
-            .frame(height: 4)
+    /// The two things that need saying about *which* day you are looking at,
+    /// shown only when they apply.
+    @ViewBuilder
+    private func contextCaption(_ payload: DayPayload, isToday: Bool) -> some View {
+        if isToday, DayKeyMath.isLateNight() {
+            captionRow(
+                symbol: "moon.stars",
+                text: "Late night — still counts for \(weekdayName(payload.dayKey))",
+            )
+        } else if !isToday {
+            captionRow(
+                symbol: "arrow.uturn.backward",
+                text: "Catching up — feel and habits are still editable.",
+            )
         }
+    }
+
+    private func captionRow(symbol: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+            Text(text).font(.microJ)
+        }
+        .foregroundStyle(Color.textTertiary)
     }
 
     static func formatPoints(_ value: Double) -> String {
@@ -436,11 +460,11 @@ struct TodayView: View {
     @ViewBuilder
     private func overdueSection(_ payload: DayPayload) -> some View {
         if !payload.overdueTasks.isEmpty {
-            Text("OVERDUE")
-                .font(.captionJ)
-                .tracking(0.6)
-                .foregroundStyle(Color.warning)
-                .padding(.top, Space.sm)
+            SectionHeader(
+                "Overdue",
+                subtitle: "\(payload.overdueTasks.count) still open",
+            )
+            .padding(.top, Space.lg)
         }
 
         ForEach(payload.overdueTasks) { task in
@@ -496,16 +520,14 @@ struct TodayView: View {
         let open = sortedOpenTasks(payload)
         let completed = payload.tasksDue.filter { $0.status == .done }
 
-        SectionHeader("Tasks")
-            .padding(.top, Space.sm)
+        SectionHeader("Tasks", subtitle: taskSubtitle(payload))
+            .padding(.top, Space.lg)
 
         if payload.tasksDue.isEmpty, payload.overdueTasks.isEmpty {
             if payload.habits.isEmpty, isToday {
                 heroEmptyState
             } else {
-                Text(isToday ? "Nothing scheduled today" : "Nothing was scheduled")
-                    .font(.bodyJ)
-                    .foregroundStyle(Color.textTertiary)
+                quietLine(isToday ? "Nothing scheduled today" : "Nothing was scheduled")
             }
         }
 
@@ -543,55 +565,77 @@ struct TodayView: View {
         }
     }
 
+    /// "3 of 7 done" — the one number that says whether the day is going well,
+    /// without having to count rows.
+    private func taskSubtitle(_ payload: DayPayload) -> String? {
+        let all = payload.tasksDue
+        guard !all.isEmpty else { return nil }
+        let done = all.filter { $0.status == .done }.count
+        return "\(done) of \(all.count) done"
+    }
+
+    private func quietLine(_ text: String) -> some View {
+        Text(text)
+            .font(.bodyJ)
+            .foregroundStyle(Color.textTertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, Space.sm)
+    }
+
     private var heroEmptyState: some View {
-        VStack(spacing: Space.sm) {
-            Text("Start by adding your first task or habit")
-                .font(.headlineJ)
-                .foregroundStyle(Color.textPrimary)
-            Text("Today fills in as you plan your day.")
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
+        EmptyState(
+            symbol: "sparkles",
+            title: "A clean slate",
+            message: "Add a task for today, or set up the habits you want to keep.",
+        ) {
+            HStack(spacing: Space.sm) {
+                Button("Add a task") { composerActive = true }
+                    .buttonStyle(.jarvisPrimary)
+                Button("Set up habits") { model.requestedSection = .habits }
+                    .buttonStyle(.jarvisSecondary)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.xl)
     }
 
     // MARK: - Habits
 
     @ViewBuilder
     private func habitsSection(_ payload: DayPayload, isToday: Bool) -> some View {
-        SectionHeader("Habits")
-            .padding(.top, Space.sm)
-
         let alsoAvailable = payload.habits.filter { isAlsoAvailable($0) }
         let active = payload.habits.filter { !isAlsoAvailable($0) }
+        let done = payload.habits.filter { isSatisfied($0) }.count
+
+        SectionHeader(
+            "Habits",
+            subtitle: payload.habits.isEmpty ? nil : "\(done) of \(payload.habits.count) done",
+        )
+        .padding(.top, Space.lg)
 
         if payload.habits.isEmpty, !payload.tasksDue.isEmpty || !payload.overdueTasks.isEmpty {
             HStack(spacing: Space.sm) {
-                Text("No habits yet — create them in the Habits tab")
-                    .font(.bodyJ)
-                    .foregroundStyle(Color.textTertiary)
-                Button("Open Habits") {
-                    model.requestedSection = .habits
-                }
-                .buttonStyle(.jarvisGhost)
+                quietLine("No habits yet")
+                Button("Set up habits") { model.requestedSection = .habits }
+                    .buttonStyle(.jarvisSoft)
             }
         }
 
+        // Each habit is its own card rather than a row in a shared list: it
+        // makes the control feel like an object you press, and it is what
+        // separates a tracker you enjoy tapping from a spreadsheet.
         ForEach(active) { entry in
-            habitRow(entry, payload: payload, subdued: false, isToday: isToday)
+            habitCard(entry, payload: payload, isToday: isToday, isMuted: false)
         }
 
         if !alsoAvailable.isEmpty {
-            Text("ALSO AVAILABLE")
-                .font(.captionJ)
-                .tracking(0.6)
-                .foregroundStyle(Color.textTertiary)
-                .padding(.top, Space.xs)
+            CaptionLabel("Also available")
+                .padding(.top, Space.sm)
         }
 
+        // Weekly habits not planned for today. Logging one promotes it — the
+        // day-swap mechanic, and the reason this group is loggable rather
+        // than merely informational.
         ForEach(alsoAvailable) { entry in
-            habitRow(entry, payload: payload, subdued: true, isToday: isToday)
+            habitCard(entry, payload: payload, isToday: isToday, isMuted: true)
         }
     }
 
@@ -599,112 +643,35 @@ struct TodayView: View {
         entry.habit.type == .weeklyFrequency && !entry.plannedToday && entry.repsToday == 0
     }
 
-    private func habitRow(
+    private func isSatisfied(_ entry: HabitTodayEntryDTO) -> Bool {
+        switch entry.habit.type {
+        case .daily, .multiDaily: entry.repsToday >= entry.habit.targetReps
+        case .weeklyFrequency: entry.weekTotal >= entry.habit.targetReps
+        }
+    }
+
+    private func habitCard(
         _ entry: HabitTodayEntryDTO,
         payload: DayPayload,
-        subdued: Bool,
         isToday: Bool,
+        isMuted: Bool,
     ) -> some View {
-        HStack(spacing: Space.md) {
-            Image(systemName: HabitDisplay.icon(for: entry.habit))
-                .font(.system(size: 15))
-                .foregroundStyle(subdued ? Color.textTertiary : Color.textSecondary)
-                .frame(width: 24)
-
-            Text(entry.habit.name)
-                .font(.headlineJ)
-                .foregroundStyle(subdued ? Color.textTertiary : Color.textPrimary)
-                .lineLimit(1)
-
-            Spacer(minLength: Space.sm)
-
-            habitControl(entry, payload: payload, isToday: isToday)
-        }
-        .frame(minHeight: RowHeight.standard)
-        .contextMenu {
-            Button("Undo last") {
-                store.unlogHabit(entry.habit.id, dayKey: payload.dayKey)
-            }
-            .disabled(entry.repsToday == 0)
-        }
+        HabitRow(
+            entry: entry,
+            dayKey: payload.dayKey,
+            isMuted: isMuted,
+            onLog: { store.logHabit(entry.habit.id, dayKey: payload.dayKey) },
+            onUnlog: { store.unlogHabit(entry.habit.id, dayKey: payload.dayKey) },
+            onOpen: { habitRoute = HabitDetailRoute(habitId: entry.habit.id) },
+        )
+        .padding(.horizontal, Space.md)
+        .background(
+            Color.bgSurface,
+            in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous),
+        )
+        .jarvisShadow(.card)
     }
 
-    @ViewBuilder
-    private func habitControl(_ entry: HabitTodayEntryDTO, payload: DayPayload, isToday: Bool) -> some View {
-        let dayKey = payload.dayKey
-        switch entry.habit.type {
-        case .daily:
-            Button {
-                if entry.repsToday > 0 {
-                    store.unlogHabit(entry.habit.id, dayKey: dayKey)
-                } else {
-                    store.logHabit(entry.habit.id, dayKey: dayKey)
-                }
-            } label: {
-                Image(systemName: entry.repsToday > 0 ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .light))
-                    .foregroundStyle(entry.repsToday > 0 ? Color.success : Color.textTertiary)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(.plain)
-
-        case .multiDaily:
-            HStack(spacing: Space.md) {
-                RepPips(done: entry.repsToday, target: entry.habit.targetReps)
-                logCapsuleButton(
-                    disabled: entry.repsToday >= entry.habit.targetReps,
-                    action: { store.logHabit(entry.habit.id, dayKey: dayKey) },
-                )
-                .contextMenu {
-                    Button("Undo last") {
-                        store.unlogHabit(entry.habit.id, dayKey: dayKey)
-                    }
-                    .disabled(entry.repsToday == 0)
-                }
-            }
-
-        case .weeklyFrequency:
-            HStack(spacing: Space.md) {
-                PaceCapsule(
-                    target: entry.habit.targetReps,
-                    done: entry.weekTotal,
-                    expectedByTonight: HabitDisplay.expectedByTonight(
-                        target: entry.habit.targetReps,
-                        dayKey: dayKey,
-                    ),
-                    // A past day's pace is settled, so use the week total
-                    // rather than the "are you behind right now" wording.
-                    status: isToday
-                        ? HabitDisplay.paceStatus(entry.pace)
-                        : HabitDisplay.weeklyStatus(
-                            total: entry.weekTotal,
-                            target: entry.habit.targetReps,
-                            dayKey: dayKey,
-                        ),
-                )
-                .frame(maxWidth: 190)
-                logCapsuleButton(
-                    disabled: false,
-                    action: { store.logHabit(entry.habit.id, dayKey: dayKey) },
-                )
-            }
-        }
-    }
-
-    private func logCapsuleButton(disabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text("+1")
-                .font(.monoJ)
-                .foregroundStyle(disabled ? Color.textTertiary : Color.accentPrimary)
-                .padding(.horizontal, Space.md)
-                .padding(.vertical, 5)
-                .background(Color.bgSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel("Log one")
-    }
 }
 
 // MARK: - Mood card

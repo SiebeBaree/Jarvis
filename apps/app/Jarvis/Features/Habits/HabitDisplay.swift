@@ -14,7 +14,18 @@ struct HabitDetailRoute: Hashable, Identifiable {
 enum HabitDisplay {
     static func icon(for habit: HabitDTO) -> String {
         let name = habit.icon?.trimmingCharacters(in: .whitespaces) ?? ""
-        return name.isEmpty ? "circle" : name
+        return name.isEmpty ? "circle.dashed" : name
+    }
+
+    /// A habit's colour identity, used by its tile, its check control, its
+    /// calendar and its charts. Habits created before the picker existed have
+    /// no `colorHex`, so they get a stable colour derived from their id rather
+    /// than all defaulting to indigo and looking like one undifferentiated list.
+    static func color(for habit: HabitDTO) -> ItemColor {
+        if let hex = habit.colorHex, !hex.isEmpty {
+            return ItemColor.named(hex)
+        }
+        return ItemColor.fallback(for: habit.id)
     }
 
     static func typeCaption(for habit: HabitDTO) -> String {

@@ -16,20 +16,28 @@ import SwiftUI
 public struct CheckCircle: View {
     private let isOn: Bool
     private let tint: Color
+    private let ringTint: Color?
     private let size: CGFloat
     private let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isEnabled) private var isEnabled
 
+    /// - Parameters:
+    ///   - tint: fill colour once checked.
+    ///   - ringTint: colour of the *empty* ring. Task rows pass the priority
+    ///     colour here, which is how priority is shown without a disconnected
+    ///     flag glyph floating at the far edge of the row.
     public init(
         isOn: Bool,
         tint: Color = .success,
+        ringTint: Color? = nil,
         size: CGFloat = 26,
         action: @escaping () -> Void
     ) {
         self.isOn = isOn
         self.tint = tint
+        self.ringTint = ringTint
         self.size = size
         self.action = action
     }
@@ -46,7 +54,7 @@ public struct CheckCircle: View {
                 // Empty state ring. Stays under the fill so the fill can grow
                 // out of it rather than replacing it.
                 Circle()
-                    .strokeBorder(isOn ? .clear : Color.borderStrong, lineWidth: 1.5)
+                    .strokeBorder(isOn ? .clear : (ringTint ?? Color.borderStrong), lineWidth: 1.8)
 
                 Circle()
                     .fill(tint)

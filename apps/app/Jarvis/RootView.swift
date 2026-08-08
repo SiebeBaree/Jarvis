@@ -65,14 +65,14 @@ enum AppSection: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Filled variants: the tab bar reads as a set of solid shapes rather than
-    /// a row of outlines, which is what most native apps do and what the
-    /// outline-only set was missing.
+    /// Distinct silhouettes beat a consistent fill weight here: four filled
+    /// circles are four identical blobs at tab-bar size, and the point of a
+    /// tab icon is to be recognisable before it is read.
     var icon: String {
         switch self {
         case .today: "sun.max.fill"
-        case .tasks: "checkmark.circle.fill"
-        case .habits: "repeat.circle.fill"
+        case .tasks: "checklist"
+        case .habits: "repeat"
         case .progress: "chart.bar.fill"
         }
     }

@@ -26,18 +26,11 @@ extension Color {
     }
 }
 
-/// Rotating palette for auto-assigning a color to newly created categories.
+/// Rotating palette for auto-assigning a colour to newly created categories.
+/// Drawn from the design system's item palette so a category dot, a habit
+/// tile and a chart series are all the same set of colours.
 enum CategoryPalette {
-    static let hexes = [
-        "#5B8DEF", // blue
-        "#E8887C", // coral
-        "#63B98F", // green
-        "#C88BD6", // purple
-        "#E5B558", // amber
-        "#5FB8C9", // teal
-        "#DB7F9E", // pink
-        "#9BA7E8", // periwinkle
-    ]
+    static let hexes = ItemColor.palette.map(\.hexString)
 
     static func next(after count: Int) -> String {
         hexes[count % hexes.count]
