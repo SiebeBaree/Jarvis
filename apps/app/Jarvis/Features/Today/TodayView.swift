@@ -12,10 +12,10 @@ import SwiftUI
 struct TodayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openSettings) private var openSettings
 
     @State private var store = TodayStore()
     @State private var selectedDay: DayKey?
-    @State private var showSettings = false
     @State private var showBreakdown = false
     /// Quick-add composer state (today's page only).
     @State private var composerActive = false
@@ -35,41 +35,19 @@ struct TodayView: View {
         .background(Color.bgCanvas)
         .navigationTitle("Today")
         .toolbar {
-            // Settings lives in the sidebar on macOS; only iPhone needs the gear.
+            // Settings lives in the sidebar on macOS; only iPhone needs the
+            // gear. Trends, Body and Improve used to hang off this toolbar as
+            // unlabelled glyphs — they are segments of the Progress tab now.
             #if os(iOS)
             ToolbarItem(placement: .navigation) {
                 Button {
-                    showSettings = true
+                    openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("Settings")
             }
-            // Trends (and Body inside it) + Improve live behind these on
-            // iPhone; macOS reaches them via the sidebar.
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    ImproveView()
-                } label: {
-                    Image(systemName: "figure.stand")
-                }
-                .accessibilityLabel("Improve")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    TrendsView()
-                } label: {
-                    Image(systemName: "chart.line.uptrend.xyaxis")
-                }
-                .accessibilityLabel("Trends")
-            }
             #endif
-        }
-        .sheet(isPresented: $showSettings) {
-            NavigationStack { SettingsView() }
-                #if os(macOS)
-                .frame(minWidth: 480, minHeight: 520)
-                #endif
         }
         .sheet(isPresented: $showBreakdown) {
             if let payload = visiblePayload {

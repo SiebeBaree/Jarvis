@@ -7,9 +7,7 @@ struct RootView: View {
     var body: some View {
         switch model.session {
         case .checking:
-            ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.bgCanvas)
+            LaunchPlaceholder()
         case .loggedOut:
             LoginView()
         case .loggedIn:
@@ -18,49 +16,73 @@ struct RootView: View {
     }
 }
 
+/// Shown for the instant between launch and knowing whether there is a
+/// session. A bare spinner on a blank canvas made every cold start read as a
+/// stall, so this is the app's own mark holding its place instead.
+private struct LaunchPlaceholder: View {
+    @State private var isBreathing = false
+
+    var body: some View {
+        ZStack {
+            Color.bgCanvas.ignoresSafeArea()
+            Circle()
+                .stroke(AngularGradient.scoreArc, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                .frame(width: 54, height: 54)
+                .scaleEffect(isBreathing ? 1 : 0.88)
+                .opacity(isBreathing ? 1 : 0.55)
+                .animation(
+                    .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                    value: isBreathing
+                )
+        }
+        .onAppear { isBreathing = true }
+        .accessibilityLabel("Loading")
+    }
+}
+
+// MARK: - Sections
+//
+// Four, down from seven. Goals, Trends, Body metrics and the improvement-area
+// check-ins used to be either a sidebar row nobody visited or an unlabelled
+// icon in Today's toolbar; they are all answers to "how am I doing over time",
+// so they are now one Progress surface. Today · Tasks · Habits · Progress maps
+// to: the day, what I have to do, what I do every day, how it is going.
+
 enum AppSection: String, CaseIterable, Identifiable {
     case today
     case tasks
     case habits
-    case goals
-    case trends
-    case metrics
-    case improve
+    case progress
 
     var id: String { rawValue }
-
-    /// iPhone tab bar (Trends/Metrics/Improve live behind Today's toolbar there).
-    static let tabSections: [AppSection] = [.today, .tasks, .habits, .goals]
-
-    /// macOS sidebar shows everything, grouped.
-    static let sidebarGroups: [(title: String?, sections: [AppSection])] = [
-        (nil, [.today]),
-        ("Aim", [.goals]),
-        ("Track", [.tasks, .habits]),
-        ("Progress", [.trends, .improve, .metrics]),
-    ]
 
     var title: String {
         switch self {
         case .today: "Today"
         case .tasks: "Tasks"
         case .habits: "Habits"
-        case .goals: "Goals"
-        case .trends: "Trends"
-        case .metrics: "Metrics"
-        case .improve: "Improve"
+        case .progress: "Progress"
         }
     }
 
+    /// Filled variants: the tab bar reads as a set of solid shapes rather than
+    /// a row of outlines, which is what most native apps do and what the
+    /// outline-only set was missing.
     var icon: String {
         switch self {
-        case .today: "sun.max"
-        case .tasks: "checklist"
-        case .habits: "repeat"
-        case .goals: "target"
-        case .trends: "chart.line.uptrend.xyaxis"
-        case .metrics: "scalemass"
-        case .improve: "figure.stand"
+        case .today: "sun.max.fill"
+        case .tasks: "checkmark.circle.fill"
+        case .habits: "repeat.circle.fill"
+        case .progress: "chart.bar.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .today: ItemColor.amber.color
+        case .tasks: ItemColor.blue.color
+        case .habits: ItemColor.violet.color
+        case .progress: ItemColor.green.color
         }
     }
 }
@@ -68,16 +90,25 @@ enum AppSection: String, CaseIterable, Identifiable {
 struct MainShell: View {
     @Environment(AppModel.self) private var model
     @State private var selection: AppSection = .today
+    @State private var showSettings = false
 
     var body: some View {
         shell
             .overlay(alignment: .bottom) { SyncStatusBar() }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack { SettingsView() }
+                    #if os(macOS)
+                    .frame(minWidth: 520, minHeight: 560)
+                    #endif
+            }
+            .environment(\.openSettings, OpenSettingsAction { showSettings = true })
             .onChange(of: model.requestedSection) { _, section in
                 if let section {
-                    selection = section
+                    withJarvisAnimation(Motion.quick) { selection = section }
                     model.requestedSection = nil
                 }
             }
+            .task { Haptics.prepare() }
     }
 
     @ViewBuilder
@@ -85,67 +116,53 @@ struct MainShell: View {
         #if os(macOS)
         NavigationSplitView {
             List(selection: $selection) {
-                ForEach(Array(AppSection.sidebarGroups.enumerated()), id: \.offset) { _, group in
-                    Section {
-                        ForEach(group.sections) { section in
-                            Label(section.title, systemImage: section.icon)
-                                .tag(section)
-                        }
-                    } header: {
-                        if let title = group.title {
-                            Text(title)
-                                .font(.captionJ)
-                                .foregroundStyle(Color.textSecondary)
-                        }
-                    }
+                ForEach(AppSection.allCases) { section in
+                    Label(section.title, systemImage: section.icon)
+                        .font(.headlineJ)
+                        .tag(section)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
             .safeAreaInset(edge: .bottom) {
-                settingsFooter
+                SidebarSettingsRow { showSettings = true }
+                    .padding(.horizontal, Space.sm)
+                    .padding(.bottom, Space.sm)
             }
         } detail: {
             NavigationStack {
                 detailView(for: selection)
             }
-            .frame(minWidth: 640)
+            .frame(minWidth: 620)
         }
         .background(Color.bgCanvas)
         .background(sectionShortcuts)
         #else
         TabView(selection: $selection) {
-            ForEach(AppSection.tabSections) { section in
-                NavigationStack {
-                    detailView(for: section)
+            ForEach(AppSection.allCases) { section in
+                Tab(section.title, systemImage: section.icon, value: section) {
+                    NavigationStack {
+                        detailView(for: section)
+                    }
                 }
-                .tabItem { Label(section.title, systemImage: section.icon) }
-                .tag(section)
             }
         }
+        .tint(Color.accentPrimary)
         #endif
     }
 
     #if os(macOS)
-    private var settingsFooter: some View {
-        SidebarSettingsRow()
-            .padding(.horizontal, Space.sm)
-            .padding(.bottom, Space.sm)
-    }
-
-    /// ⌘1–⌘4 jump to the main sections.
+    /// ⌘1–⌘4 jump to the sections.
     private var sectionShortcuts: some View {
         Group {
-            shortcutButton(.today, "1")
-            shortcutButton(.tasks, "2")
-            shortcutButton(.habits, "3")
-            shortcutButton(.goals, "4")
+            ForEach(Array(AppSection.allCases.enumerated()), id: \.element) { index, section in
+                Button(section.title) { selection = section }
+                    .keyboardShortcut(
+                        KeyEquivalent(Character("\(index + 1)")),
+                        modifiers: .command
+                    )
+            }
         }
         .hidden()
-    }
-
-    private func shortcutButton(_ section: AppSection, _ key: KeyEquivalent) -> some View {
-        Button(section.title) { selection = section }
-            .keyboardShortcut(key, modifiers: .command)
     }
     #endif
 
@@ -155,39 +172,53 @@ struct MainShell: View {
         case .today: TodayView()
         case .tasks: TasksView()
         case .habits: HabitsView()
-        case .goals: GoalsView()
-        case .trends: TrendsView()
-        case .metrics:
-            MetricsView()
-                .background(Color.bgCanvas)
-                .navigationTitle("Metrics")
-        case .improve: ImproveView()
+        case .progress: ProgressHubView()
         }
     }
 }
 
+// MARK: - Settings access
+//
+// Settings is a sheet owned by the shell rather than a screen each tab has to
+// re-present, so any view can raise it without knowing where it lives.
+
+struct OpenSettingsAction {
+    private let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) {
+        self.handler = handler
+    }
+
+    func callAsFunction() { handler() }
+}
+
+private struct OpenSettingsKey: EnvironmentKey {
+    static let defaultValue = OpenSettingsAction {}
+}
+
+extension EnvironmentValues {
+    var openSettings: OpenSettingsAction {
+        get { self[OpenSettingsKey.self] }
+        set { self[OpenSettingsKey.self] = newValue }
+    }
+}
+
 #if os(macOS)
-/// Settings pinned to the sidebar bottom (§B1); ⌘, comes from the Settings scene.
+/// Settings pinned to the sidebar bottom; ⌘, comes from the Settings scene.
 private struct SidebarSettingsRow: View {
-    @State private var showSettings = false
+    let action: () -> Void
 
     var body: some View {
-        Button {
-            showSettings = true
-        } label: {
-            Label("Settings", systemImage: "gearshape")
-                .font(.subheadJ)
+        Button(action: action) {
+            Label("Settings", systemImage: "gearshape.fill")
+                .font(.subheadStrongJ)
                 .foregroundStyle(Color.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.sm)
-                .padding(.vertical, Space.xs)
+                .padding(.vertical, Space.sm)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showSettings) {
-            NavigationStack { SettingsView() }
-                .frame(minWidth: 480, minHeight: 520)
-        }
     }
 }
 #endif

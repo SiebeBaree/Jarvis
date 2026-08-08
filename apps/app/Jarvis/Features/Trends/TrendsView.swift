@@ -186,19 +186,6 @@ struct TrendsView: View {
         }
         .background(Color.bgCanvas)
         .navigationTitle("Trends")
-        #if os(iOS)
-        // Metrics lives inside Trends on iPhone (macOS reaches it via the sidebar).
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    MetricsView()
-                        .navigationTitle("Metrics")
-                } label: {
-                    Label("Metrics", systemImage: "scalemass")
-                }
-            }
-        }
-        #endif
         .sheet(item: $breakdownRoute) { route in
             ScoreBreakdownSheet(dayKey: route.dayKey)
         }

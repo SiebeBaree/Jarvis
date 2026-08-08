@@ -174,6 +174,8 @@ struct MetricsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .background(Color.bgCanvas)
+        .navigationTitle("Body")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
