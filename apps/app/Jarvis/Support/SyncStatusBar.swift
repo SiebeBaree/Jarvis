@@ -34,8 +34,8 @@ struct SyncStatusBar: View {
                 )
             }
         }
-        .animation(.easeOut(duration: 0.2), value: stalled)
-        .animation(.easeOut(duration: 0.2), value: model.queue.failure)
+        .jarvisAnimation(Motion.smooth, value: stalled)
+        .jarvisAnimation(Motion.smooth, value: model.queue.failure)
         .task(id: pendingCount) {
             guard pendingCount > 0 else {
                 stalled = false
@@ -54,26 +54,29 @@ struct SyncStatusBar: View {
     ) -> some View {
         HStack(spacing: Space.sm) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tint)
             Text(text)
-                .font(.captionJ)
+                .font(.microJ)
                 .foregroundStyle(Color.textSecondary)
                 .lineLimit(2)
             if let action {
                 Spacer(minLength: Space.sm)
                 Button(action.label, action: action.run)
-                    .buttonStyle(.plain)
-                    .font(.captionJ)
-                    .foregroundStyle(Color.accentPrimary)
+                    .buttonStyle(.jarvisSoft)
             }
         }
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.sm)
         .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+        .jarvisShadow(.floating)
         .padding(.horizontal, PageMargin.standard)
-        .padding(.bottom, Space.sm)
+        // Clears the floating tab bar on iOS; on Mac it sits at the window edge.
+        #if os(iOS)
+        .padding(.bottom, 96)
+        #else
+        .padding(.bottom, Space.md)
+        #endif
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

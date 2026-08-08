@@ -277,3 +277,87 @@ describes the old design.
   going back worth doing. On macOS the strip moved inside the List as its
   first row (toolbar stays transparent); on iPhone it stays fixed above the
   pager, since it is the stable frame the pages swipe behind.
+
+## 2026-08-08 — UI rework: design system, four tabs, fast habit add
+
+The app worked but did not feel like a dedicated tracker. Everything below is a
+deliberate departure from `docs/spec.md` §B2 (design tokens), §B1 (navigation)
+and §B3 (page layouts), which still describe the original Attio-inspired design.
+The database was wiped to an empty account first, at the user's request.
+
+### Design tokens (replaces §B2)
+
+- **Shadows are no longer banned.** §B2 said "cards = surface + 1px hairline,
+  **no shadow**". Cards now have two stacked soft shadows (`Elevation`), heavier
+  in dark mode where a shadow alone cannot lift `#1A1A1F` off `#0E0E11`. The
+  hairline survives in dark mode only. A bordered rectangle with no elevation
+  reads as a form, not an app.
+- **An item palette exists.** Twelve colours (`ItemColor`) with a stable id, a
+  saturated value and a derived 16%-opacity soft backing. Habits, task
+  categories and areas each carry one and wear it everywhere — icon tile, check
+  ring, count ring, backfill strip, calendar dots, pace bar, detail screen.
+  §B2's rule was "accent used sparingly, never large accent fills"; that rule
+  produced a list of twelve identical gray rows. Colour is now the primary
+  scanning affordance. The restraint rule still holds for *chrome* — the indigo
+  accent is still only CTAs, selection and links.
+- **Type is SF Pro Rounded** for structure (titles, row names, numerals) and
+  plain SF for running text. `monoJ` is rounded-with-monospaced-digits rather
+  than SF Mono, which read as "code" next to everything else.
+- **Radii and row heights up**: cards 10→16, rows 44→56pt on iPhone. Controls
+  that draw smaller than 44pt (check circles, count rings) keep a 44pt hit
+  target regardless.
+- **Motion is a token set, not per call site.** `Motion.standard/quick/pop/
+  gauge/smooth`, all springs, all routed through `jarvisAnimation` so Reduce
+  Motion is honoured centrally. §B2's "animations 0.25s ease-out" is gone — a
+  linear ease reads as "a value changed", a spring reads as "an object moved".
+- **Haptics**, which the spec never mentioned. Logging a habit is the app's
+  core interaction and it is now felt as well as seen.
+
+### Navigation (replaces §B1)
+
+Seven sections became four: **Today · Tasks · Habits · Progress**. Goals,
+Trends, Body and Improve are segments of Progress rather than two sidebar rows
+and two unlabelled glyphs in Today's toolbar. The Progress segment picker lives
+in the window toolbar on macOS and a top safe-area inset on iOS — this is the
+one place the "no fixed content at a macOS top edge" rule is satisfied by
+putting the control *in* the toolbar instead of inside the scroll view. Each
+segment's child dropped its own `navigationTitle`; the hub owns it.
+
+Settings is a shell-owned sheet reached through an `openSettings` environment
+action instead of being re-presented per screen.
+
+### Habits
+
+- **`POST /habits` now takes a client-generated `id` and upserts on it**, the
+  same contract tasks and habit logs already had. This is what lets habit
+  creation go through the offline outbox: the row renders and is loggable
+  before the request has left the device. It also sends `sortOrder` — without
+  it the server stored 0 and a new habit sorted into the middle of the list on
+  the next refresh.
+- **Inline quick-add** at the top of the Habits tab replaces "tap + → sheet →
+  Form → Save → wait". Type a name, press return. Tapping the selected
+  frequency chip again bumps its number, so "8×/day" needs no stepper.
+- **Habits have a colour picker.** `colorHex` was in the schema since Stage 1
+  and never set by any UI. Habits created before it exists derive a stable
+  colour from their id rather than all rendering indigo.
+- The editor is a designed sheet with a live preview of the row, and targets
+  are a row of number buttons instead of a `Stepper`.
+- Today and Habits share one `HabitRow`; they used to draw different controls
+  with different spacing.
+
+### Today
+
+- Inline navigation title on iOS and the date moved inside the score ring as
+  its caption, removing two rows of pure chrome above the fold.
+- Priority moved from a flag glyph at the row's trailing edge onto the check
+  ring itself.
+- Habits render as individual cards; tasks as flat rows with an inset hairline.
+- Tapping a habit on Today opens its detail (it previously did nothing).
+
+### Not done
+
+- The Progress segments still host the pre-existing Trends/Goals/Body/Improve
+  screens largely unchanged inside the new shell; only their chrome was
+  updated. A content-level redesign of those four is the next pass.
+- `RepPips` survives in `HabitDetailView`'s today card; `CountRing` supersedes
+  it everywhere else.

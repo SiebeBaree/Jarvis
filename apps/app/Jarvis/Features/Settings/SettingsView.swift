@@ -142,7 +142,7 @@ struct SettingsView: View {
                 Button("Erase all data", role: .destructive) { resetAccount() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Deletes your goals, blocks, habits, tasks, mood and score history, photos, conversations, and everything J.A.R.V.I.S. knows. Your account and settings stay. This cannot be undone.")
+                Text("Deletes your habits, tasks, goals, mood and score history, body metrics and photos. Your account and settings stay. This cannot be undone.")
             }
             if let resetError {
                 Text(resetError)
@@ -152,7 +152,7 @@ struct SettingsView: View {
         } header: {
             Text("Danger zone")
         } footer: {
-            Text("After the reset the setup wizard runs again.")
+            Text("You land back on an empty Today and start over.")
                 .font(.captionJ)
                 .foregroundStyle(Color.textTertiary)
         }
