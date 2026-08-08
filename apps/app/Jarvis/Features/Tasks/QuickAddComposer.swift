@@ -90,10 +90,11 @@ struct QuickAddComposer: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             HStack(spacing: Space.md) {
-                Image(systemName: isEngaged ? "circle" : "plus")
-                    .font(.system(size: isEngaged ? 22 : 15, weight: isEngaged ? .light : .medium))
-                    .foregroundStyle(isEngaged ? Color.textTertiary : Color.accentPrimary)
-                    .frame(width: 22)
+                Image(systemName: isEngaged ? "circle" : "plus.circle.fill")
+                    .font(.system(size: 22, weight: isEngaged ? .light : .regular))
+                    .foregroundStyle(isEngaged ? Color.borderStrong : Color.accentPrimary)
+                    .frame(width: 24)
+                    .contentTransition(.symbolEffect(.replace))
 
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.plain)
@@ -109,7 +110,7 @@ struct QuickAddComposer: View {
                 if !trimmedTitle.isEmpty {
                     Button(action: submit) {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 24))
+                            .font(.system(size: 26))
                             .foregroundStyle(Color.accentPrimary)
                     }
                     .buttonStyle(.plain)
@@ -151,12 +152,22 @@ struct QuickAddComposer: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear")
                 }
-                .padding(.leading, 22 + Space.md)
+                .padding(.leading, 24 + Space.md)
                 .padding(.bottom, Space.xs)
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: isEngaged)
+        // Lifts into a card while you write in it; lies flat in the row
+        // rhythm when idle, so an empty list is not dominated by a form.
+        .padding(.horizontal, isEngaged ? Space.md : 0)
+        .background {
+            if isEngaged {
+                RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+                    .fill(Color.bgSurface)
+                    .jarvisShadow(.raised)
+            }
+        }
+        .jarvisAnimation(Motion.standard, value: isEngaged)
         #if os(macOS)
         .onExitCommand { close() }
         #endif
@@ -219,10 +230,9 @@ struct QuickAddComposer: View {
             HStack(spacing: Space.xs) {
                 PriorityFlag(draft.priority.flagLevel)
             }
-            .padding(.horizontal, Space.sm)
-            .padding(.vertical, 3)
+            .padding(.horizontal, Space.md)
+            .padding(.vertical, 6)
             .background(Color.bgSubtle, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -265,16 +275,15 @@ struct QuickAddComposer: View {
     private func chipBody(icon: String, text: String, isSet: Bool) -> some View {
         HStack(spacing: Space.xs) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(.system(size: 10, weight: .semibold))
             Text(text)
-                .font(.captionJ)
+                .font(.microJ)
                 .lineLimit(1)
         }
         .foregroundStyle(isSet ? Color.accentPrimary : Color.textSecondary)
-        .padding(.horizontal, Space.sm)
-        .padding(.vertical, 3)
+        .padding(.horizontal, Space.md)
+        .padding(.vertical, 6)
         .background(isSet ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
     }
 
     // MARK: - Actions

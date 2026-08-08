@@ -45,11 +45,11 @@ struct TasksView: View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(
-                top: Space.xs, leading: PageMargin.standard,
-                bottom: Space.xs, trailing: PageMargin.standard,
+                top: 3, leading: PageMargin.standard,
+                bottom: 3, trailing: PageMargin.standard,
             ))
             #if os(macOS)
-            .frame(maxWidth: 760)
+            .frame(maxWidth: PageMargin.contentMaxWidth)
             .frame(maxWidth: .infinity)
             #endif
         }
@@ -58,6 +58,9 @@ struct TasksView: View {
         .refreshable { await store.fetch(force: true) }
         .background(Color.bgCanvas)
         .navigationTitle("Tasks")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -221,12 +224,11 @@ struct TasksView: View {
                     showNewCategoryAlert = true
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color.textSecondary)
-                        .padding(.horizontal, Space.sm)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, Space.md)
+                        .padding(.vertical, 7)
                         .background(Color.bgSubtle, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("New category")
@@ -240,23 +242,30 @@ struct TasksView: View {
         dotColor: Color?,
         action: @escaping () -> Void,
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: Space.xs) {
+        // A selected category wears its own colour rather than the app accent:
+        // the chip row is the one place the categories are being compared, so
+        // that is exactly where their colours should be doing the work.
+        let tint = dotColor ?? .accentPrimary
+        return Button {
+            Haptics.play(.light)
+            withJarvisAnimation(Motion.quick) { action() }
+        } label: {
+            HStack(spacing: 5) {
                 if let dotColor {
                     Circle()
                         .fill(dotColor)
-                        .frame(width: 6, height: 6)
+                        .frame(width: 7, height: 7)
                 }
                 Text(title)
                     .font(.captionJ)
             }
-            .foregroundStyle(isSelected ? Color.accentPrimary : Color.textSecondary)
+            .foregroundStyle(isSelected ? tint : Color.textSecondary)
             .padding(.horizontal, Space.md)
-            .padding(.vertical, 6)
-            .background(isSelected ? Color.accentSubtle : Color.bgSubtle, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
+            .padding(.vertical, 7)
+            .background(isSelected ? tint.opacity(0.14) : Color.bgSubtle, in: Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
     // MARK: - List body
@@ -413,35 +422,56 @@ struct TasksView: View {
         #endif
     }
 
-    private func captionHeader(_ title: String, color: Color = .textSecondary) -> some View {
-        Text(title.uppercased())
-            .font(.captionJ)
-            .tracking(0.6)
-            .foregroundStyle(color)
+    private func captionHeader(_ title: String, color: Color = .textTertiary) -> some View {
+        CaptionLabel(title, color: color)
+            .padding(.top, Space.sm)
     }
 
     private func emptyState(_ message: String) -> some View {
-        VStack(spacing: Space.md) {
-            Text(message)
-                .font(.bodyJ)
-                .foregroundStyle(Color.textSecondary)
-            Button("Add task") { composerActive = true }
-                .buttonStyle(.jarvisGhost)
+        EmptyState(
+            symbol: emptySymbol,
+            title: message,
+            message: emptyDetail,
+            tint: ItemColor.blue.color,
+        ) {
+            if store.segment != .done {
+                Button("Add a task") { composerActive = true }
+                    .buttonStyle(.jarvisPrimary)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.xxl * 2)
+    }
+
+    private var emptySymbol: String {
+        switch store.segment {
+        case .today: "checkmark.circle"
+        case .upcoming: "calendar"
+        case .all: "tray"
+        case .done: "archivebox"
+        }
+    }
+
+    private var emptyDetail: String? {
+        switch store.segment {
+        case .today: "Nothing due today. Add one above, or enjoy it."
+        case .upcoming: "Nothing scheduled after today."
+        case .all: nil
+        case .done: "Completed tasks collect here."
+        }
     }
 
     private func inlineError(_ message: String) -> some View {
         HStack(spacing: Space.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.danger)
             Text(message)
                 .font(.subheadJ)
-                .foregroundStyle(Color.danger)
+                .foregroundStyle(Color.textSecondary)
             Spacer(minLength: Space.sm)
             Button("Dismiss") { store.actionError = nil }
-                .font(.subheadJ)
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentPrimary)
+                .buttonStyle(.jarvisSoft)
         }
+        .padding(Space.md)
+        .background(Color.dangerSubtle, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
     }
 }
