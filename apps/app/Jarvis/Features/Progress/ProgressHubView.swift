@@ -29,6 +29,12 @@ struct ProgressHubView: View {
     var body: some View {
         content
             .background(Color.bgCanvas)
+            .navigationTitle("Progress")
+            #if os(iOS)
+            // Inline: the segment chips directly below already name the page,
+            // and a large title left an empty band above them.
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             // The picker lives in the window toolbar on macOS and in a top
             // safe-area inset on iOS. Both keep it visible in *every* load
             // state — passing it into each child as a first scrolling row
@@ -42,6 +48,7 @@ struct ProgressHubView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 picker
                     .padding(.horizontal, PageMargin.standard)
+                    .padding(.top, Space.xs)
                     .padding(.bottom, Space.sm)
                     .background(Color.bgCanvas)
             }

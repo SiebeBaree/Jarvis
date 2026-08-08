@@ -175,7 +175,6 @@ struct MetricsView: View {
             }
         }
         .background(Color.bgCanvas)
-        .navigationTitle("Body")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

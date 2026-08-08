@@ -32,7 +32,6 @@ struct ImproveView: View {
             }
         }
         .background(Color.bgCanvas)
-        .navigationTitle("Improve")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

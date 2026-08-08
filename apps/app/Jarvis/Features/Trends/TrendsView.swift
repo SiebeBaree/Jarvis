@@ -185,7 +185,6 @@ struct TrendsView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color.bgCanvas)
-        .navigationTitle("Trends")
         .sheet(item: $breakdownRoute) { route in
             ScoreBreakdownSheet(dayKey: route.dayKey)
         }

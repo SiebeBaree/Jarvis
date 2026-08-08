@@ -25,7 +25,6 @@ struct GoalsView: View {
             }
         }
         .background(Color.bgCanvas)
-        .navigationTitle("Goals")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
