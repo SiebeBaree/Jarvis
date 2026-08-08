@@ -1,39 +1,42 @@
 import SwiftUI
 
-// MARK: - Streak chip (spec §B5.4)
+// MARK: - Streak chip
 //
-// Flame + mono count + unit ("12 days" / "6 weeks"). Hidden below 2
-// (no "1 day streak" noise). Broken streaks show a grayed "ended" variant.
+// Flame + count. Hidden below 2 — a "1 day streak" is not a streak, it is
+// noise on every freshly created habit. Broken streaks grey out rather than
+// alarming: this app never punishes.
 
 public struct StreakChip: View {
     private let count: Int
     private let unit: String
     private let ended: Bool
+    private let isCompact: Bool
 
-    public init(count: Int, unit: String, ended: Bool = false) {
+    public init(count: Int, unit: String, ended: Bool = false, compact: Bool = false) {
         self.count = count
         self.unit = unit
         self.ended = ended
+        self.isCompact = compact
     }
+
+    private var tint: Color { ended ? .textTertiary : .warning }
 
     public var body: some View {
         if count >= 2 {
-            HStack(spacing: Space.xs) {
+            HStack(spacing: 3) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(ended ? Color.textTertiary : Color.warning)
-                Text("\(count) \(unit)")
-                    .font(.monoJ)
-                    .foregroundStyle(ended ? Color.textTertiary : Color.textSecondary)
-                if ended {
-                    Text("ended")
-                        .font(.captionJ)
-                        .foregroundStyle(Color.textTertiary)
+                    .font(.system(size: isCompact ? 9 : 10, weight: .semibold))
+                Text(isCompact ? "\(count)" : "\(count) \(unit)")
+                    .font(.microJ)
+                    .monospacedDigit()
+                if ended, !isCompact {
+                    Text("ended").font(.microJ).opacity(0.7)
                 }
             }
-            .padding(.horizontal, Space.sm)
+            .foregroundStyle(tint)
+            .padding(.horizontal, isCompact ? 5 : Space.sm)
             .padding(.vertical, 3)
-            .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
+            .background(tint.opacity(0.12), in: Capsule())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(ended ? "Streak of \(count) \(unit) ended" : "\(count) \(unit) streak"))
         }
@@ -45,8 +48,9 @@ public struct StreakChip: View {
         StreakChip(count: 12, unit: "days")
         StreakChip(count: 6, unit: "weeks")
         StreakChip(count: 9, unit: "days", ended: true)
+        StreakChip(count: 24, unit: "days", compact: true)
         HStack(spacing: Space.xs) {
-            Text("count = 1 renders nothing →").font(.captionJ).foregroundStyle(Color.textTertiary)
+            Text("count = 1 renders nothing →").font(.subheadJ).foregroundStyle(Color.textTertiary)
             StreakChip(count: 1, unit: "days")
         }
     }

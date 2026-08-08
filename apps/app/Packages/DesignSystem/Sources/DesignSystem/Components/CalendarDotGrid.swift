@@ -37,22 +37,42 @@ public struct CalendarDotGrid: View {
     private let month: Int
     private let days: [Int: CalendarDay]
     private let weekResults: [WeekResult]?
+    private let tint: Color
 
-    public init(year: Int, month: Int, days: [CalendarDay], weekResults: [WeekResult]? = nil) {
+    public init(
+        year: Int,
+        month: Int,
+        days: [CalendarDay],
+        weekResults: [WeekResult]? = nil,
+        tint: Color = .success
+    ) {
         self.year = year
         self.month = month
         self.days = Dictionary(days.map { ($0.day, $0) }, uniquingKeysWith: { first, _ in first })
         self.weekResults = weekResults
+        self.tint = tint
     }
 
     /// Convenience init from any date within the month.
-    public init(monthAnchor: Date, days: [CalendarDay], weekResults: [WeekResult]? = nil, calendar: Calendar = .current) {
+    public init(
+        monthAnchor: Date,
+        days: [CalendarDay],
+        weekResults: [WeekResult]? = nil,
+        tint: Color = .success,
+        calendar: Calendar = .current
+    ) {
         let components = calendar.dateComponents([.year, .month], from: monthAnchor)
-        self.init(year: components.year ?? 2000, month: components.month ?? 1, days: days, weekResults: weekResults)
+        self.init(
+            year: components.year ?? 2000,
+            month: components.month ?? 1,
+            days: days,
+            weekResults: weekResults,
+            tint: tint
+        )
     }
 
-    private let dotSize: CGFloat = 10
-    private let cellHeight: CGFloat = 20
+    private let dotSize: CGFloat = 13
+    private let cellHeight: CGFloat = 24
     private let weekdaySymbols = ["M", "T", "W", "T", "F", "S", "S"]
 
     /// Weeks as rows of optional day numbers (nil = outside the month).
@@ -93,7 +113,8 @@ public struct CalendarDotGrid: View {
                         if let dayNumber = week[column] {
                             DayDot(
                                 day: days[dayNumber] ?? CalendarDay(day: dayNumber, state: .notApplicable),
-                                dotSize: dotSize
+                                dotSize: dotSize,
+                                tint: tint
                             )
                         } else {
                             Color.clear.frame(width: dotSize, height: dotSize)
@@ -132,12 +153,12 @@ public struct CalendarDotGrid: View {
     private var legend: some View {
         HStack(spacing: Space.md) {
             legendItem(label: "Complete") {
-                Circle().fill(Color.success)
+                Circle().fill(tint)
             }
             legendItem(label: "Partial") {
                 ZStack {
                     Circle().strokeBorder(Color.borderStrong, lineWidth: 1)
-                    PieSlice(fraction: 0.5).fill(Color.success)
+                    PieSlice(fraction: 0.5).fill(tint)
                 }
             }
             legendItem(label: "Missed") {
@@ -162,15 +183,16 @@ public struct CalendarDotGrid: View {
 private struct DayDot: View {
     let day: CalendarDay
     let dotSize: CGFloat
+    let tint: Color
 
     var body: some View {
         ZStack {
             switch day.state {
             case .full:
-                Circle().fill(Color.success)
+                Circle().fill(tint)
             case .partial(let fraction):
                 Circle().strokeBorder(Color.borderStrong, lineWidth: 1)
-                PieSlice(fraction: min(max(fraction, 0), 1)).fill(Color.success)
+                PieSlice(fraction: min(max(fraction, 0), 1)).fill(tint)
             case .missed:
                 Circle().strokeBorder(Color.borderStrong, lineWidth: 1)
             case .notApplicable:
@@ -199,7 +221,7 @@ private struct WeekResultCell: View {
         switch result {
         case .met:
             Image(systemName: "checkmark")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Color.success)
         case .missed:
             Text("—")
