@@ -31,22 +31,32 @@ export const POST = handler(async (request: Request) => {
   const body = await parseBody(request, habitCreateSchema);
   const today = todayKey(ctx.settings);
 
-  const [created] = await db
-    .insert(habits)
-    .values({
-      userId: ctx.userId,
-      name: body.name,
-      icon: body.icon ?? null,
-      colorHex: body.colorHex ?? null,
-      type: body.type,
-      targetReps: body.targetReps ?? DEFAULT_TARGET_REPS[body.type],
-      plannedDays: body.plannedDays ?? [],
-      areaId: body.areaId ?? null,
-      startDate: body.startDate ?? today,
-      sortOrder: body.sortOrder ?? 0,
-    })
-    .returning();
-  if (!created) throw new ApiError(500, "internal_error", "Could not create habit");
+  const insert = db.insert(habits).values({
+    id: body.id,
+    userId: ctx.userId,
+    name: body.name,
+    icon: body.icon ?? null,
+    colorHex: body.colorHex ?? null,
+    type: body.type,
+    targetReps: body.targetReps ?? DEFAULT_TARGET_REPS[body.type],
+    plannedDays: body.plannedDays ?? [],
+    areaId: body.areaId ?? null,
+    startDate: body.startDate ?? today,
+    sortOrder: body.sortOrder ?? 0,
+  });
+  // A client-chosen id makes a retried create a no-op instead of a duplicate,
+  // which is what lets habit creation go through the offline outbox.
+  const [created] = await (body.id ? insert.onConflictDoNothing() : insert).returning();
+
+  if (!created) {
+    if (!body.id) throw new ApiError(500, "internal_error", "Could not create habit");
+    const existing = await db.query.habits.findFirst({ where: eq(habits.id, body.id) });
+    if (!existing) throw new ApiError(500, "internal_error", "Could not create habit");
+    if (existing.userId !== ctx.userId) {
+      throw new ApiError(409, "id_conflict", "That habit id is already taken");
+    }
+    return NextResponse.json(existing);
+  }
 
   await recomputeDay(ctx.userId, ctx.settings, today);
   return NextResponse.json(created, { status: 201 });

@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 import JarvisAPI
 import Observation
@@ -192,6 +193,63 @@ final class HabitsStore {
     private nonisolated struct HabitLogPayload: Encodable, Sendable {
         let dayKey: DayKey?
         let completionId: String?
+    }
+
+    /// Creates a habit without waiting for the network.
+    ///
+    /// The row appears with the id it will keep, so it is loggable, editable
+    /// and openable before the request has been sent — and because the id is
+    /// client-generated, a replay from the outbox upserts instead of leaving
+    /// two identical habits behind.
+    func create(_ incoming: HabitCreateRequest) {
+        guard let model else { return }
+        // New habits go to the end of the list. This has to travel to the
+        // server, not just into the local copy, or the next refresh reorders
+        // it back into the middle.
+        var request = incoming
+        request.sortOrder = (content.value?.habits.map(\.sortOrder).max() ?? -1) + 1
+        let habit = HabitDTO.locallyCreated(
+            id: request.id,
+            name: request.name,
+            icon: request.icon,
+            colorHex: request.colorHex,
+            type: request.type,
+            targetReps: request.targetReps ?? Self.defaultTarget(for: request.type),
+            plannedDays: request.plannedDays ?? [],
+            areaId: request.areaId,
+            startDate: request.startDate ?? DayKeyMath.todayKey(),
+            sortOrder: request.sortOrder ?? 0,
+        )
+        if var loaded = content.value {
+            loaded.habits.append(habit)
+            // Today's list has to gain it too, or the new habit is invisible on
+            // the screen the user is most likely looking at next.
+            loaded.today.habits.append(.fresh(habit))
+            apply(loaded)
+        }
+        model.mutate(
+            "POST",
+            "/habits",
+            body: request,
+            entities: [.habit, .score],
+            label: request.name,
+        )
+    }
+
+    static func defaultTarget(for type: HabitType) -> Int {
+        switch type {
+        case .daily: 1
+        case .multiDaily: 2
+        case .weeklyFrequency: 3
+        }
+    }
+
+    /// Next unused palette colour, so a list of habits never ends up as five
+    /// indigo rows in a row.
+    func nextColorHex() -> String {
+        let used = Set((content.value?.habits ?? []).compactMap(\.colorHex))
+        let unused = ItemColor.palette.first { !used.contains($0.hexString) }
+        return (unused ?? ItemColor.palette[used.count % ItemColor.palette.count]).hexString
     }
 
     func setPaused(_ habit: HabitDTO, paused: Bool) {

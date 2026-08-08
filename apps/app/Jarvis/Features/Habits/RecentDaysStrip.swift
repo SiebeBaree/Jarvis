@@ -10,6 +10,9 @@ struct RecentDaysStrip: View {
     let recentDays: [HabitRecentDayDTO]
     let store: HabitsStore
 
+    /// The habit's own colour, so its strip, tile and control agree.
+    private var tint: Color { HabitDisplay.color(for: entry.habit).color }
+
     private var todayKey: DayKey { recentDays.last?.dayKey ?? DayKeyMath.todayKey() }
 
     var body: some View {
@@ -33,11 +36,11 @@ struct RecentDaysStrip: View {
         return VStack(spacing: 3) {
             Text(weekdayLetter(day.dayKey))
                 .font(.captionJ)
-                .foregroundStyle(isToday ? Color.accentPrimary : Color.textTertiary)
+                .foregroundStyle(isToday ? Color.textPrimary : Color.textTertiary)
 
             ZStack {
                 if complete {
-                    Circle().fill(Color.success)
+                    Circle().fill(tint)
                     if habit.type == .multiDaily, habit.targetReps > 1 {
                         Text("\(day.reps)")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -53,10 +56,10 @@ struct RecentDaysStrip: View {
                     }
                 } else if day.reps > 0 {
                     // Partial multi-daily day: hollow ring + rep count.
-                    Circle().strokeBorder(Color.success, lineWidth: 1.5)
+                    Circle().strokeBorder(tint, lineWidth: 1.5)
                     Text("\(day.reps)")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color.success)
+                        .foregroundStyle(tint)
                 } else {
                     Circle().strokeBorder(
                         beforeStart ? Color.borderHairline.opacity(0.4) : Color.borderHairline,
@@ -65,10 +68,11 @@ struct RecentDaysStrip: View {
                 }
             }
             .frame(width: 24, height: 24)
+            .jarvisAnimation(Motion.pop, value: day.reps)
             .overlay {
                 if isToday {
                     Circle()
-                        .strokeBorder(Color.accentPrimary.opacity(0.5), lineWidth: 1)
+                        .strokeBorder(tint.opacity(0.45), lineWidth: 1.5)
                         .frame(width: 30, height: 30)
                 }
             }
@@ -77,6 +81,7 @@ struct RecentDaysStrip: View {
         .opacity(beforeStart ? 0.35 : 1)
         .onTapGesture {
             guard !beforeStart else { return }
+            Haptics.play(day.reps >= target ? .light : .success)
             tap(day)
         }
         .contextMenu {

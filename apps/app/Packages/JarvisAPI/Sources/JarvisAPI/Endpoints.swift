@@ -103,6 +103,10 @@ public struct TaskCategoryCreateRequest: Encodable, Sendable {
 }
 
 public struct HabitCreateRequest: Encodable, Sendable {
+    /// Client-generated, so the row can render — and be logged against — before
+    /// the request has left the device, and so a queue replay upserts rather
+    /// than creating a second copy.
+    public var id: String
     public var name: String
     public var icon: String?
     public var colorHex: String?
@@ -111,8 +115,12 @@ public struct HabitCreateRequest: Encodable, Sendable {
     public var plannedDays: [Int]?
     public var areaId: String?
     public var startDate: DayKey?
+    /// Sent, not just held locally: without it the server stores 0 and a new
+    /// habit sorts into the middle of the list on the next refresh.
+    public var sortOrder: Int?
 
     public init(
+        id: String = UUID().uuidString,
         name: String,
         icon: String? = nil,
         colorHex: String? = nil,
@@ -121,7 +129,9 @@ public struct HabitCreateRequest: Encodable, Sendable {
         plannedDays: [Int]? = nil,
         areaId: String? = nil,
         startDate: DayKey? = nil,
+        sortOrder: Int? = nil,
     ) {
+        self.id = id
         self.name = name
         self.icon = icon
         self.colorHex = colorHex
@@ -130,6 +140,7 @@ public struct HabitCreateRequest: Encodable, Sendable {
         self.plannedDays = plannedDays
         self.areaId = areaId
         self.startDate = startDate
+        self.sortOrder = sortOrder
     }
 }
 

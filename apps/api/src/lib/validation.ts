@@ -250,6 +250,9 @@ export const templatePatchSchema = templateCreateSchema.partial().extend({
 // ---------- habits ----------
 export const habitCreateSchema = z
   .object({
+    // Client-generated, so a queued create that gets replayed upserts instead
+    // of adding a second copy of the habit.
+    id: z.string().uuid().optional(),
     name: z.string().min(1).max(120),
     icon: z.string().max(80).nullish(),
     colorHex: z

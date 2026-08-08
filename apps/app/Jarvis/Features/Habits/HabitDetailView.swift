@@ -22,6 +22,12 @@ struct HabitDetailView: View {
     private var todayKey: String { DayKeyMath.todayKey() }
     private var currentMonth: String { String(todayKey.prefix(7)) }
 
+    /// The habit's own colour — its calendar, pace bar and stats all wear it,
+    /// so arriving here from a blue row does not land you on a green screen.
+    private var tintColor: Color {
+        habit.map { HabitDisplay.color(for: $0).color } ?? .accentPrimary
+    }
+
     var body: some View {
         Group {
             if let habit {
@@ -167,7 +173,7 @@ struct HabitDetailView: View {
         let status = HabitDisplay.weeklyStatus(total: total, target: target, dayKey: todayKey)
 
         return VStack(alignment: .leading, spacing: Space.lg) {
-            SectionHeader("This Week")
+            SectionHeader("This week")
 
             HStack(alignment: .firstTextBaseline, spacing: Space.md) {
                 Text("\(total) / \(target)")
@@ -181,6 +187,7 @@ struct HabitDetailView: View {
                 done: total,
                 expectedByTonight: HabitDisplay.expectedByTonight(target: target, dayKey: todayKey),
                 status: status,
+                tint: tintColor,
             )
 
             Text(weekLine(total: total, target: target, status: status))
@@ -366,6 +373,7 @@ struct HabitDetailView: View {
                     month: monthComponent,
                     days: dotDays(response),
                     weekResults: habit.type == .weeklyFrequency ? weekResults(response) : nil,
+                    tint: tintColor,
                 )
             case .failed(let message):
                 Text(message)

@@ -2,8 +2,12 @@ import DesignSystem
 import JarvisAPI
 import SwiftUI
 
-/// Habits list (§B3): week-pace header strip, habit cards grouped by area,
-/// paused group at the bottom, editor sheet via toolbar +.
+/// The Habits tab: compose at the top, habit cards below, paused ones tucked
+/// away at the bottom.
+///
+/// One List owns the whole page, with the composer as its first scrolling row
+/// — fixed content at a macOS window's top edge makes the toolbar paint its
+/// permanent opaque band.
 struct HabitsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -11,7 +15,7 @@ struct HabitsView: View {
     @State private var store = HabitsStore()
     @State private var detailRoute: HabitDetailRoute?
     @State private var editingHabit: HabitDTO?
-    @State private var showNewEditor = false
+    @State private var editorDraft: HabitDraft?
     @State private var archiveCandidate: HabitDTO?
     @State private var showPaused = false
 
@@ -28,29 +32,22 @@ struct HabitsView: View {
         }
         .background(Color.bgCanvas)
         .navigationTitle("Habits")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showNewEditor = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("New habit")
-            }
-        }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .navigationDestination(item: $detailRoute) { route in
             HabitDetailView(
                 habitId: route.habitId,
                 preloaded: store.content.value?.habits.first(where: { $0.id == route.habitId }),
             )
         }
-        .sheet(isPresented: $showNewEditor) {
-            HabitEditorView(mode: .create) {
+        .sheet(item: $editorDraft) { draft in
+            HabitEditorView(mode: .create(draft), store: store) {
                 store.invalidateStats()
             }
         }
         .sheet(item: $editingHabit) { habit in
-            HabitEditorView(mode: .edit(habit)) {
+            HabitEditorView(mode: .edit(habit), store: store) {
                 store.invalidateStats(for: habit.id)
             }
         }
@@ -71,6 +68,7 @@ struct HabitsView: View {
         }
         .task {
             store.configure(model)
+            Haptics.prepare()
             await store.load()
         }
         .onChange(of: model.dataRevision) {
@@ -85,49 +83,233 @@ struct HabitsView: View {
 
     // MARK: - Content
 
-    @ViewBuilder
     private var content: some View {
-        if store.activeHabits.isEmpty, store.pausedHabits.isEmpty {
-            emptyState
-        } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.lg) {
-                    if let error = store.mutationError {
-                        errorBanner(error)
-                    }
-                    headerStrip
-                    ForEach(store.groupedHabits) { group in
-                        SectionHeader(group.title)
-                            .padding(.top, Space.xs)
-                        ForEach(group.habits) { habit in
-                            habitCard(habit)
-                        }
-                    }
-                    pausedGroup
+        List {
+            Group {
+                quickAdd
+                if let error = store.mutationError {
+                    errorBanner(error)
                 }
-                .padding(PageMargin.standard)
-                #if os(macOS)
-                .frame(maxWidth: 760)
-                .frame(maxWidth: .infinity)
-                #endif
+                if store.activeHabits.isEmpty, store.pausedHabits.isEmpty {
+                    emptyState
+                } else {
+                    paceLine
+                }
+
+                // One flat, ordered list of rows across all groups. Group
+                // headers are emitted inline rather than nesting a ForEach in
+                // a ForEach, so every row keeps a stable identity and removing
+                // one animates the row that actually left.
+                ForEach(rowItems) { item in
+                    switch item.kind {
+                    case .header(let title):
+                        CaptionLabel(title)
+                            .padding(.top, Space.md)
+                    case .habit(let habit):
+                        habitCard(habit)
+                    }
+                }
+
+                pausedToggle
+                ForEach(showPaused ? store.pausedHabits : []) { habit in
+                    pausedCard(habit)
+                }
+                Color.clear.frame(height: Space.xxxl)
             }
-            .refreshable { await store.load(force: true) }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(
+                top: 4, leading: PageMargin.standard,
+                bottom: 4, trailing: PageMargin.standard,
+            ))
+            #if os(macOS)
+            .frame(maxWidth: PageMargin.contentMaxWidth)
+            .frame(maxWidth: .infinity)
+            #endif
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable { await store.load(force: true) }
+    }
+
+    private var quickAdd: some View {
+        HabitQuickAdd(
+            nextColorHex: store.nextColorHex(),
+            onCreate: { store.create($0) },
+            onOpenEditor: { editorDraft = $0 },
+        )
+        .padding(.top, Space.xs)
+        .padding(.bottom, Space.sm)
+    }
+
+    /// A group header is only worth a row when there is more than one group —
+    /// "General" above every habit you own is pure noise.
+    private struct RowItem: Identifiable {
+        enum Kind {
+            case header(String)
+            case habit(HabitDTO)
+        }
+
+        let id: String
+        let kind: Kind
+    }
+
+    private var rowItems: [RowItem] {
+        let groups = store.groupedHabits
+        guard groups.count > 1 else {
+            return (groups.first?.habits ?? []).map { RowItem(id: $0.id, kind: .habit($0)) }
+        }
+        return groups.flatMap { group in
+            [RowItem(id: "header-\(group.id)", kind: .header(group.title))]
+                + group.habits.map { RowItem(id: $0.id, kind: .habit($0)) }
         }
     }
 
-    private func errorState(_ message: String) -> some View {
-        VStack(spacing: Space.lg) {
-            Text(message)
-                .font(.bodyJ)
+    private var paceLine: some View {
+        let summary = store.paceSummary
+        return HStack(spacing: Space.sm) {
+            Text("This week")
+                .font(.subheadStrongJ)
                 .foregroundStyle(Color.textSecondary)
-                .multilineTextAlignment(.center)
-            Button("Retry") {
-                Task { await store.load() }
+            Text("\(summary.onPace) of \(summary.total) on pace")
+                .font(.subheadJ)
+                .foregroundStyle(Color.textTertiary)
+            Spacer(minLength: Space.sm)
+            HStack(spacing: 3) {
+                ForEach(Array(summary.flags.enumerated()), id: \.offset) { _, onPace in
+                    Capsule()
+                        .fill(onPace ? Color.success : Color.bgSubtle)
+                        .frame(width: 12, height: 4)
+                }
             }
-            .buttonStyle(.jarvisSecondary)
         }
-        .padding(Space.xxl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, Space.xs)
+        .padding(.bottom, Space.xs)
+    }
+
+    // MARK: - Cards
+
+    @ViewBuilder
+    private func habitCard(_ habit: HabitDTO) -> some View {
+        let entry = store.todayEntry(for: habit.id)
+
+        VStack(alignment: .leading, spacing: Space.sm) {
+            if let entry {
+                HabitRow(
+                    entry: entry,
+                    dayKey: store.content.value?.today.dayKey ?? DayKeyMath.todayKey(),
+                    streak: store.stats[habit.id]?.streak,
+                    onLog: { store.logHabit(habit.id) },
+                    onUnlog: { store.unlogHabit(habit.id) },
+                    onOpen: { detailRoute = HabitDetailRoute(habitId: habit.id) },
+                )
+                if let recentDays = entry.recentDays, !recentDays.isEmpty {
+                    Divider().overlay(Color.borderHairline)
+                    RecentDaysStrip(entry: entry, recentDays: recentDays, store: store)
+                        .padding(.bottom, Space.xs)
+                }
+            } else {
+                // A habit created moments ago, before Today's payload has
+                // caught up. It still renders — it just has nothing to log yet.
+                HStack(spacing: Space.md) {
+                    IconTile(
+                        symbol: HabitDisplay.icon(for: habit),
+                        color: HabitDisplay.color(for: habit),
+                    )
+                    Text(habit.name).font(.headlineJ).foregroundStyle(Color.textPrimary)
+                    Spacer()
+                }
+                .frame(minHeight: RowHeight.standard)
+            }
+        }
+        .padding(.horizontal, Space.md)
+        .padding(.vertical, Space.xs)
+        .background(Color.bgSurface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .jarvisShadow(.card)
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { editingHabit = habit }
+            Button(habit.pausedAt == nil ? "Pause" : "Resume", systemImage: "pause") {
+                store.setPaused(habit, paused: habit.pausedAt == nil)
+            }
+            Button("Archive", systemImage: "archivebox", role: .destructive) {
+                archiveCandidate = habit
+            }
+        }
+    }
+
+    private func pausedCard(_ habit: HabitDTO) -> some View {
+        HStack(spacing: Space.md) {
+            IconTile(
+                symbol: HabitDisplay.icon(for: habit),
+                color: HabitDisplay.color(for: habit),
+                isMuted: true,
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(habit.name)
+                    .font(.headlineJ)
+                    .foregroundStyle(Color.textSecondary)
+                Text("Not counted in scoring")
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textTertiary)
+            }
+            Spacer(minLength: Space.sm)
+            Button("Resume") { store.setPaused(habit, paused: false) }
+                .buttonStyle(.jarvisSoft)
+        }
+        .padding(.horizontal, Space.md)
+        .frame(minHeight: RowHeight.standard)
+        .background(Color.bgSurface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { editingHabit = habit }
+            Button("Resume", systemImage: "play") { store.setPaused(habit, paused: false) }
+            Button("Archive", systemImage: "archivebox", role: .destructive) {
+                archiveCandidate = habit
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pausedToggle: some View {
+        if !store.pausedHabits.isEmpty {
+            Button {
+                withJarvisAnimation(Motion.smooth) { showPaused.toggle() }
+            } label: {
+                HStack(spacing: Space.xs) {
+                    Text("Paused (\(store.pausedHabits.count))")
+                        .font(.subheadStrongJ)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(showPaused ? 90 : 0))
+                }
+                .foregroundStyle(Color.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, Space.lg)
+        }
+    }
+
+    // MARK: - States
+
+    private var emptyState: some View {
+        EmptyState(
+            symbol: "repeat",
+            title: "No habits yet",
+            message: "Type a name above and press return. Daily by default — tap the chips to make it several times a day, or a weekly target.",
+            tint: ItemColor.violet.color,
+        )
+    }
+
+    private func errorState(_ message: String) -> some View {
+        EmptyState(
+            symbol: "exclamationmark.triangle",
+            title: "Could not load habits",
+            message: message,
+            tint: .warning,
+        ) {
+            Button("Try again") { Task { await store.load(force: true) } }
+                .buttonStyle(.jarvisPrimary)
+        }
+        .frame(maxHeight: .infinity)
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -139,261 +321,11 @@ struct HabitsView: View {
             Spacer(minLength: Space.sm)
             Button("Retry") {
                 store.mutationError = nil
-                Task { await store.load() }
+                Task { await store.load(force: true) }
             }
-            .buttonStyle(.plain)
-            .font(.subheadJ)
-            .foregroundStyle(Color.accentPrimary)
+            .buttonStyle(.jarvisSoft)
         }
         .padding(Space.md)
-        .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-    }
-
-    // MARK: - Header line
-
-    /// Quiet caption line — no bar chrome, matches the app's section style.
-    private var headerStrip: some View {
-        let summary = store.paceSummary
-        return HStack(spacing: Space.md) {
-            Text("This week · \(summary.onPace) of \(summary.total) habits on pace")
-                .font(.subheadJ)
-                .foregroundStyle(Color.textSecondary)
-            HStack(spacing: Space.xs) {
-                ForEach(Array(summary.flags.enumerated()), id: \.offset) { _, onPace in
-                    Circle()
-                        .fill(onPace ? Color.success : Color.warning)
-                        .frame(width: 6, height: 6)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: - Habit card
-
-    private func habitCard(_ habit: HabitDTO) -> some View {
-        let entry = store.todayEntry(for: habit.id)
-        let stats = store.stats[habit.id]
-
-        return VStack(alignment: .leading, spacing: Space.md) {
-            HStack(spacing: Space.md) {
-                Image(systemName: HabitDisplay.icon(for: habit))
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color.textSecondary)
-                    .frame(width: 32, height: 32)
-                    .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(habit.name)
-                        .font(.headlineJ)
-                        .foregroundStyle(Color.textPrimary)
-                        .lineLimit(1)
-                    HStack(spacing: Space.sm) {
-                        Text(HabitDisplay.typeCaption(for: habit))
-                            .font(.subheadJ)
-                            .foregroundStyle(Color.textSecondary)
-                        if let stats {
-                            StreakChip(count: stats.streak.current, unit: stats.streak.unit)
-                        }
-                    }
-                }
-
-                Spacer(minLength: Space.sm)
-
-                if let entry {
-                    habitControl(entry)
-                }
-            }
-
-            if let entry, let recentDays = entry.recentDays, !recentDays.isEmpty {
-                RecentDaysStrip(entry: entry, recentDays: recentDays, store: store)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .jarvisCard(padding: Space.md)
-        .contentShape(Rectangle())
-        .onTapGesture { detailRoute = HabitDetailRoute(habitId: habit.id) }
-        .contextMenu {
-            Button("Edit") { editingHabit = habit }
-            Button(habit.pausedAt == nil ? "Pause" : "Resume") {
-                store.setPaused(habit, paused: habit.pausedAt == nil)
-            }
-            Button("Archive", role: .destructive) { archiveCandidate = habit }
-        }
-    }
-
-    @ViewBuilder
-    private func habitControl(_ entry: HabitTodayEntryDTO) -> some View {
-        switch entry.habit.type {
-        case .daily:
-            Button {
-                Task {
-                    if entry.repsToday > 0 {
-                        store.unlogHabit(entry.habit.id)
-                    } else {
-                        store.logHabit(entry.habit.id)
-                    }
-                }
-            } label: {
-                Image(systemName: entry.repsToday > 0 ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .light))
-                    .foregroundStyle(entry.repsToday > 0 ? Color.success : Color.textTertiary)
-                    .contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(.plain)
-
-        case .multiDaily:
-            HStack(spacing: Space.md) {
-                RepPips(done: entry.repsToday, target: entry.habit.targetReps)
-                logButton(disabled: entry.repsToday >= entry.habit.targetReps) {
-                    store.logHabit(entry.habit.id)
-                }
-            }
-
-        case .weeklyFrequency:
-            HStack(spacing: Space.md) {
-                PaceCapsule(
-                    target: entry.habit.targetReps,
-                    done: entry.weekTotal,
-                    expectedByTonight: HabitDisplay.expectedByTonight(
-                        target: entry.habit.targetReps,
-                        dayKey: store.content.value?.today.dayKey ?? DayKeyMath.todayKey(),
-                    ),
-                    status: HabitDisplay.paceStatus(entry.pace),
-                )
-                .frame(maxWidth: 180)
-                logButton(disabled: false) {
-                    store.logHabit(entry.habit.id)
-                }
-            }
-        }
-    }
-
-    private func logButton(disabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text("+1")
-                .font(.monoJ)
-                .foregroundStyle(disabled ? Color.textTertiary : Color.accentPrimary)
-                .padding(.horizontal, Space.md)
-                .padding(.vertical, 5)
-                .background(Color.bgSubtle, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.borderHairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .accessibilityLabel("Log one")
-    }
-
-    // MARK: - Paused group
-
-    @ViewBuilder
-    private var pausedGroup: some View {
-        if !store.pausedHabits.isEmpty {
-            Button {
-                withAnimation(.easeOut(duration: 0.25)) { showPaused.toggle() }
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Text("Paused (\(store.pausedHabits.count))")
-                        .font(.subheadJ)
-                        .foregroundStyle(Color.textTertiary)
-                    Image(systemName: showPaused ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.textTertiary)
-                }
-            }
-            .buttonStyle(.plain)
-            .padding(.top, Space.sm)
-
-            if showPaused {
-                ForEach(store.pausedHabits) { habit in
-                    HStack(spacing: Space.md) {
-                        Image(systemName: HabitDisplay.icon(for: habit))
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.textTertiary)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(habit.name)
-                                .font(.headlineJ)
-                                .foregroundStyle(Color.textTertiary)
-                            Text("Paused — not counted in scoring")
-                                .font(.captionJ)
-                                .foregroundStyle(Color.textTertiary)
-                        }
-                        Spacer()
-                        Button("Resume") {
-                            store.setPaused(habit, paused: false)
-                        }
-                        .buttonStyle(.jarvisGhost)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .jarvisCard(padding: Space.md)
-                    .opacity(0.7)
-                    .contextMenu {
-                        Button("Edit") { editingHabit = habit }
-                        Button("Resume") {
-                            store.setPaused(habit, paused: false)
-                        }
-                        Button("Archive", role: .destructive) { archiveCandidate = habit }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Empty state
-
-    private var emptyState: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.xl) {
-                Text("Habits are the engine of your daily score")
-                    .font(.title2J)
-                    .foregroundStyle(Color.textPrimary)
-
-                VStack(alignment: .leading, spacing: Space.lg) {
-                    explainerRow(
-                        icon: "checkmark.circle",
-                        title: "Daily",
-                        detail: "Once a day. A simple check keeps the streak alive.",
-                    )
-                    explainerRow(
-                        icon: "circle.grid.2x1",
-                        title: "Multiple per day",
-                        detail: "N times a day — partial reps earn partial credit.",
-                    )
-                    explainerRow(
-                        icon: "calendar",
-                        title: "Weekly target",
-                        detail: "N times a week. Only the weekly total counts — swap days freely.",
-                    )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .jarvisCard()
-
-                Button("Create habit") {
-                    showNewEditor = true
-                }
-                .buttonStyle(.jarvisPrimary)
-            }
-            .padding(PageMargin.standard)
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private func explainerRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Space.md) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(Color.accentPrimary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headlineJ)
-                    .foregroundStyle(Color.textPrimary)
-                Text(detail)
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.textSecondary)
-            }
-        }
+        .background(Color.warningSubtle, in: RoundedRectangle(cornerRadius: Radius.row, style: .continuous))
     }
 }

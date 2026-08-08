@@ -2,23 +2,32 @@ import DesignSystem
 import JarvisAPI
 import SwiftUI
 
-/// Habit editor sheet (§B3): name, icon grid, area, type (locked when
-/// editing), per-type targets, planned days, start date (create only),
-/// archive section (edit only).
+/// Habit editor. Name, icon, colour, frequency, target, planned days, area.
+///
+/// Rebuilt from a grouped `Form` into a designed sheet with a live preview of
+/// the row you are about to create. The old version made you imagine the
+/// result from a stack of labelled controls; this shows it, which is also the
+/// fastest way to notice you picked the same colour as an existing habit.
+///
+/// Creating is local-first — the sheet closes the moment you tap Save and the
+/// write drains from the outbox. Editing an existing habit still goes through
+/// the queue too, so neither path blocks on the network.
 struct HabitEditorView: View {
     enum Mode {
-        case create
+        case create(HabitDraft)
         case edit(HabitDTO)
     }
 
     let mode: Mode
+    var store: HabitsStore?
     var onSaved: (() -> Void)? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String
-    @State private var icon: String
+    @State private var symbol: String
+    @State private var colorHex: String
     @State private var areaId: String?
     @State private var type: HabitType
     @State private var timesPerDay: Int
@@ -26,26 +35,29 @@ struct HabitEditorView: View {
     @State private var plannedDays: Set<Int>
     @State private var startDate: Date
     @State private var areas: [AreaDTO] = []
-    @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showSymbolPicker = false
     @State private var showArchiveConfirm = false
 
-    init(mode: Mode, onSaved: (() -> Void)? = nil) {
+    init(mode: Mode, store: HabitsStore? = nil, onSaved: (() -> Void)? = nil) {
         self.mode = mode
+        self.store = store
         self.onSaved = onSaved
         switch mode {
-        case .create:
-            _name = State(initialValue: "")
-            _icon = State(initialValue: "circle")
+        case .create(let draft):
+            _name = State(initialValue: draft.name)
+            _symbol = State(initialValue: draft.symbol)
+            _colorHex = State(initialValue: draft.colorHex)
             _areaId = State(initialValue: nil)
-            _type = State(initialValue: .daily)
-            _timesPerDay = State(initialValue: 2)
-            _timesPerWeek = State(initialValue: 3)
+            _type = State(initialValue: draft.type)
+            _timesPerDay = State(initialValue: draft.type == .multiDaily ? draft.targetReps : 2)
+            _timesPerWeek = State(initialValue: draft.type == .weeklyFrequency ? draft.targetReps : 3)
             _plannedDays = State(initialValue: [])
             _startDate = State(initialValue: .now)
         case .edit(let habit):
             _name = State(initialValue: habit.name)
-            _icon = State(initialValue: HabitDisplay.icon(for: habit))
+            _symbol = State(initialValue: HabitDisplay.icon(for: habit))
+            _colorHex = State(initialValue: HabitDisplay.color(for: habit).hexString)
             _areaId = State(initialValue: habit.areaId)
             _type = State(initialValue: habit.type)
             _timesPerDay = State(initialValue: habit.type == .multiDaily ? habit.targetReps : 2)
@@ -64,25 +76,42 @@ struct HabitEditorView: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var color: ItemColor { ItemColor.named(colorHex) }
+
+    private var targetReps: Int {
+        switch type {
+        case .daily: 1
+        case .multiDaily: timesPerDay
+        case .weeklyFrequency: timesPerWeek
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                nameSection
-                iconSection
-                areaSection
-                typeSection
-                if !isEditing {
-                    Section {
-                        DatePicker("Start date", selection: $startDate, displayedComponents: .date)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    preview
+                    identityCard
+                    frequencyCard
+                    if type == .weeklyFrequency {
+                        plannedDaysCard
+                    }
+                    optionsCard
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.subheadJ)
+                            .foregroundStyle(Color.danger)
+                    }
+                    if isEditing {
+                        archiveButton
                     }
                 }
-                saveSection
-                if isEditing {
-                    archiveSection
-                }
+                .padding(PageMargin.standard)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-            .formStyle(.grouped)
-            .navigationTitle(isEditing ? "Edit Habit" : "New Habit")
+            .background(Color.bgCanvas)
+            .navigationTitle(isEditing ? "Edit habit" : "New habit")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -90,159 +119,246 @@ struct HabitEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .font(.headlineJ)
+                        .disabled(trimmedName.isEmpty)
+                }
             }
         }
         #if os(macOS)
-        .frame(minWidth: 440, minHeight: 560)
+        .frame(minWidth: 460, minHeight: 600)
         #endif
+        .sheet(isPresented: $showSymbolPicker) {
+            SymbolPickerSheet(selection: $symbol, tint: color)
+        }
         .task { await loadAreas() }
     }
 
-    // MARK: - Sections
+    // MARK: - Preview
 
-    private var nameSection: some View {
-        Section("Name") {
-            TextField("Habit name", text: $name)
-                .font(.bodyJ)
-        }
-    }
-
-    private var iconSection: some View {
-        Section("Icon") {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.sm), count: 8), spacing: Space.sm) {
-                ForEach(Self.icons, id: \.self) { symbol in
-                    Button {
-                        icon = symbol
-                    } label: {
-                        Image(systemName: symbol)
-                            .font(.system(size: 15))
-                            .foregroundStyle(icon == symbol ? Color.accentPrimary : Color.textSecondary)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                icon == symbol ? Color.accentSubtle : Color.clear,
-                                in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(symbol)
-                }
-            }
-            .padding(.vertical, Space.xs)
-        }
-    }
-
-    private var areaSection: some View {
-        Section("Area") {
-            Picker("Area", selection: $areaId) {
-                Text("None").tag(String?.none)
-                ForEach(areas) { area in
-                    Text(area.name).tag(String?.some(area.id))
-                }
-            }
-        }
-    }
-
-    private var typeSection: some View {
-        Section {
-            Picker("Type", selection: $type) {
-                Text("Daily").tag(HabitType.daily)
-                Text("Per day").tag(HabitType.multiDaily)
-                Text("Weekly").tag(HabitType.weeklyFrequency)
-            }
-            .pickerStyle(.segmented)
-            .disabled(isEditing)
-
-            if type == .multiDaily {
-                Stepper("Times per day: \(timesPerDay)", value: $timesPerDay, in: 2...10)
-            }
-            if type == .weeklyFrequency {
-                Stepper("Times per week: \(timesPerWeek)", value: $timesPerWeek, in: 1...7)
-                plannedDaysRow
-            }
-        } header: {
-            Text("Type")
-        } footer: {
-            if isEditing {
-                Text("The type is locked — changing it would corrupt this habit's history.")
-            } else if type == .weeklyFrequency {
-                Text("Suggested days (never penalized)")
-            }
-        }
-    }
-
-    private var plannedDaysRow: some View {
-        let letters = ["M", "T", "W", "T", "F", "S", "S"]
-        return HStack(spacing: Space.sm) {
-            ForEach(1...7, id: \.self) { day in
-                let isOn = plannedDays.contains(day)
-                Button {
-                    if isOn {
-                        plannedDays.remove(day)
-                    } else {
-                        plannedDays.insert(day)
-                    }
-                } label: {
-                    Text(letters[day - 1])
-                        .font(.captionJ)
-                        .foregroundStyle(isOn ? .white : Color.textSecondary)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            isOn ? Color.accentPrimary : Color.bgSubtle,
-                            in: Circle(),
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Weekday \(day)")
-                .accessibilityAddTraits(isOn ? .isSelected : [])
-            }
-        }
-        .padding(.vertical, Space.xs)
-    }
-
-    private var saveSection: some View {
-        Section {
-            if let errorMessage {
-                Text(errorMessage)
+    /// The row as it will appear in the list.
+    private var preview: some View {
+        HStack(spacing: Space.md) {
+            IconTile(symbol: symbol, color: color, size: TileSize.large)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(trimmedName.isEmpty ? "New habit" : trimmedName)
+                    .font(.title3J)
+                    .foregroundStyle(trimmedName.isEmpty ? Color.textTertiary : Color.textPrimary)
+                    .lineLimit(1)
+                Text(frequencyCaption)
                     .font(.subheadJ)
                     .foregroundStyle(Color.textSecondary)
             }
-            Button {
-                Task { await save() }
-            } label: {
-                if isSaving {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Text("Save")
-                        .frame(maxWidth: .infinity)
-                }
+            Spacer(minLength: Space.sm)
+            if type == .daily {
+                CheckCircle(isOn: true, tint: color.color, size: 28) {}
+                    .allowsHitTesting(false)
+            } else {
+                CountRing(done: max(targetReps - 1, 0), target: targetReps, tint: color.color)
             }
-            .buttonStyle(.jarvisPrimary)
-            .disabled(trimmedName.isEmpty || isSaving)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+        .jarvisAnimation(Motion.standard, value: colorHex)
+        .jarvisAnimation(Motion.standard, value: targetReps)
+    }
+
+    private var frequencyCaption: String {
+        switch type {
+        case .daily: "Every day"
+        case .multiDaily: "\(timesPerDay) times a day"
+        case .weeklyFrequency: "\(timesPerWeek) times a week"
         }
     }
 
-    private var archiveSection: some View {
-        Section {
-            Button("Archive habit", role: .destructive) {
-                showArchiveConfirm = true
-            }
-            .confirmationDialog(
-                "Archive this habit?",
-                isPresented: $showArchiveConfirm,
-            ) {
-                Button("Archive", role: .destructive) {
-                    Task { await archive() }
+    // MARK: - Cards
+
+    private var identityCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            TextField("Habit name", text: $name)
+                .font(.headlineJ)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, Space.md)
+                .frame(height: 44)
+                .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+
+            HStack(spacing: Space.md) {
+                Button {
+                    showSymbolPicker = true
+                } label: {
+                    HStack(spacing: Space.sm) {
+                        IconTile(symbol: symbol, color: color, size: TileSize.small)
+                        Text("Icon").font(.subheadStrongJ).foregroundStyle(Color.textSecondary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .padding(.horizontal, Space.md)
+                    .frame(height: 40)
+                    .background(Color.bgSubtle, in: Capsule())
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("It stops counting from today. All history is kept.")
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
             }
-        } footer: {
-            Text("Archiving keeps the habit's history and calendar.")
+
+            ColorPickerRow(selection: $colorHex)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    private var frequencyCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("How often")
+
+            ChipPicker(
+                [HabitType.daily, .multiDaily, .weeklyFrequency],
+                selection: $type,
+                fillsWidth: true,
+            ) { option in
+                switch option {
+                case .daily: "Daily"
+                case .multiDaily: "Per day"
+                case .weeklyFrequency: "Per week"
+                }
+            }
+            .disabled(isEditing)
+            .opacity(isEditing ? 0.5 : 1)
+
+            switch type {
+            case .daily:
+                caption("Once a day. A simple check keeps the streak alive.")
+            case .multiDaily:
+                stepper(
+                    label: "Times a day",
+                    value: $timesPerDay,
+                    range: 2...10,
+                )
+                caption("Partial reps earn partial credit — 1 of 2 is 50%.")
+            case .weeklyFrequency:
+                stepper(
+                    label: "Times a week",
+                    value: $timesPerWeek,
+                    range: 1...7,
+                )
+                caption("Only the weekly total counts. Swap days freely.")
+            }
+
+            if isEditing {
+                caption("The frequency type is locked — changing it would rewrite this habit's history.")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    /// A row of segmented number buttons instead of a `Stepper`: the target is
+    /// almost always a small number, and tapping "8" directly beats tapping
+    /// "+" six times.
+    private func stepper(label: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            Text(label)
+                .font(.subheadStrongJ)
+                .foregroundStyle(Color.textSecondary)
+            HStack(spacing: Space.xs) {
+                ForEach(Array(range), id: \.self) { number in
+                    let isOn = value.wrappedValue == number
+                    Button {
+                        Haptics.play(.light)
+                        withJarvisAnimation(Motion.quick) { value.wrappedValue = number }
+                    } label: {
+                        Text("\(number)")
+                            .font(.monoJ)
+                            .foregroundStyle(isOn ? .white : Color.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(isOn ? color.color : Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var plannedDaysCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Suggested days", subtitle: "Never penalised — only the weekly total counts")
+            let letters = ["M", "T", "W", "T", "F", "S", "S"]
+            HStack(spacing: Space.xs) {
+                ForEach(1...7, id: \.self) { day in
+                    let isOn = plannedDays.contains(day)
+                    Button {
+                        Haptics.play(.light)
+                        withJarvisAnimation(Motion.quick) {
+                            if isOn { plannedDays.remove(day) } else { plannedDays.insert(day) }
+                        }
+                    } label: {
+                        Text(letters[day - 1])
+                            .font(.captionJ)
+                            .foregroundStyle(isOn ? .white : Color.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(isOn ? color.color : Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Weekday \(day)")
+                    .accessibilityAddTraits(isOn ? .isSelected : [])
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    private var optionsCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            if !areas.isEmpty {
+                HStack {
+                    Text("Area").font(.subheadStrongJ).foregroundStyle(Color.textSecondary)
+                    Spacer()
+                    Picker("Area", selection: $areaId) {
+                        Text("None").tag(String?.none)
+                        ForEach(areas) { area in
+                            Text(area.name).tag(String?.some(area.id))
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            if !isEditing {
+                HStack {
+                    Text("Start date").font(.subheadStrongJ).foregroundStyle(Color.textSecondary)
+                    Spacer()
+                    DatePicker("", selection: $startDate, displayedComponents: .date)
+                        .labelsHidden()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+        .opacity(areas.isEmpty && isEditing ? 0 : 1)
+    }
+
+    private var archiveButton: some View {
+        Button("Archive habit", role: .destructive) {
+            showArchiveConfirm = true
+        }
+        .buttonStyle(.jarvisSecondary)
+        .frame(maxWidth: .infinity)
+        .confirmationDialog("Archive this habit?", isPresented: $showArchiveConfirm) {
+            Button("Archive", role: .destructive) { archive() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It stops counting from today. All history is kept.")
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadJ)
+            .foregroundStyle(Color.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Actions
@@ -253,77 +369,58 @@ struct HabitEditorView: View {
         }
     }
 
-    private var targetReps: Int {
-        switch type {
-        case .daily: 1
-        case .multiDaily: timesPerDay
-        case .weeklyFrequency: timesPerWeek
-        }
-    }
-
-    private func save() async {
-        isSaving = true
-        defer { isSaving = false }
-        do {
-            switch mode {
-            case .create:
-                let request = HabitCreateRequest(
-                    name: trimmedName,
-                    icon: icon,
-                    type: type,
-                    targetReps: targetReps,
-                    plannedDays: type == .weeklyFrequency ? plannedDays.sorted() : nil,
-                    areaId: areaId,
-                    startDate: DayKeyMath.dayFormatter.string(from: startDate),
-                )
-                _ = try await model.api.createHabit(request)
-            case .edit(let habit):
-                var patch: JSONObject = [
-                    "name": .string(trimmedName),
-                    "icon": .string(icon),
-                    "targetReps": .int(targetReps),
-                    "areaId": areaId.map { .string($0) } ?? .null,
-                ]
-                if type == .weeklyFrequency {
-                    patch["plannedDays"] = .array(plannedDays.sorted().map { .int($0) })
-                }
-                _ = try await model.api.patchHabit(id: habit.id, patch)
+    private func save() {
+        switch mode {
+        case .create:
+            let request = HabitCreateRequest(
+                name: trimmedName,
+                icon: symbol,
+                colorHex: colorHex,
+                type: type,
+                targetReps: targetReps,
+                plannedDays: type == .weeklyFrequency ? plannedDays.sorted() : nil,
+                areaId: areaId,
+                startDate: DayKeyMath.dayFormatter.string(from: startDate),
+            )
+            if let store {
+                store.create(request)
+            } else {
+                // No store in context (opened from Today): fall back to a
+                // queued write, which still never blocks the UI.
+                model.mutate("POST", "/habits", body: request, entities: [.habit, .score], label: request.name)
             }
-            model.invalidateToday()
-            onSaved?()
-            dismiss()
-        } catch {
-            model.handle(error)
-            errorMessage = TodayStore.message(for: error)
+        case .edit(let habit):
+            var patch: JSONObject = [
+                "name": .string(trimmedName),
+                "icon": .string(symbol),
+                "colorHex": .string(colorHex),
+                "targetReps": .int(targetReps),
+                "areaId": areaId.map { .string($0) } ?? .null,
+            ]
+            if type == .weeklyFrequency {
+                patch["plannedDays"] = .array(plannedDays.sorted().map { .int($0) })
+            }
+            model.mutate(
+                "PATCH",
+                "/habits/\(habit.id)",
+                body: patch,
+                entities: [.habit, .score],
+                label: trimmedName,
+            )
         }
+        Haptics.play(.success)
+        onSaved?()
+        dismiss()
     }
 
-    private func archive() async {
+    private func archive() {
         guard case .edit(let habit) = mode else { return }
-        do {
-            _ = try await model.api.archiveHabit(id: habit.id)
-            model.invalidateToday()
-            onSaved?()
-            dismiss()
-        } catch {
-            model.handle(error)
-            errorMessage = TodayStore.message(for: error)
+        if let store {
+            store.archive(habit)
+        } else {
+            model.mutate("POST", "/habits/\(habit.id)/archive", entities: [.habit, .score], label: habit.name)
         }
+        onSaved?()
+        dismiss()
     }
-
-    // MARK: - Curated SF Symbols
-
-    static let icons: [String] = [
-        "dumbbell.fill", "figure.run", "figure.walk", "figure.strengthtraining.traditional",
-        "figure.mind.and.body", "figure.pool.swim", "bicycle", "flame.fill",
-        "drop.fill", "fork.knife", "carrot.fill", "cup.and.saucer.fill",
-        "pills.fill", "cross.case.fill", "bed.double.fill", "alarm.fill",
-        "sun.max.fill", "moon.fill", "moon.stars.fill", "leaf.fill",
-        "book.fill", "books.vertical.fill", "graduationcap.fill", "brain.head.profile",
-        "pencil", "text.book.closed.fill", "laptopcomputer", "briefcase.fill",
-        "dollarsign.circle.fill", "chart.line.uptrend.xyaxis", "checklist", "calendar",
-        "phone.fill", "message.fill", "person.2.fill", "heart.fill",
-        "face.smiling", "comb.fill", "shower.fill", "mouth.fill",
-        "hands.and.sparkles.fill", "music.note", "camera.fill", "paintbrush.fill",
-    ]
 }

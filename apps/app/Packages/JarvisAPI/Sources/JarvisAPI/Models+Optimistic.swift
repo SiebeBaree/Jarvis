@@ -149,7 +149,56 @@ extension TaskRowDTO {
     }
 }
 
+extension HabitDTO {
+    /// A habit created on this device, carrying the client-generated id it
+    /// will keep on the server — so the row renders, and can be logged
+    /// against, before the create request has left the device.
+    public static func locallyCreated(
+        id: String,
+        name: String,
+        icon: String?,
+        colorHex: String?,
+        type: HabitType,
+        targetReps: Int,
+        plannedDays: [Int],
+        areaId: String?,
+        startDate: DayKey,
+        sortOrder: Int,
+    ) -> HabitDTO {
+        HabitDTO(
+            id: id,
+            name: name,
+            icon: icon,
+            colorHex: colorHex,
+            type: type,
+            targetReps: targetReps,
+            plannedDays: plannedDays,
+            areaId: areaId,
+            startDate: startDate,
+            pausedAt: nil,
+            archivedAt: nil,
+            sortOrder: sortOrder,
+        )
+    }
+}
+
 extension HabitTodayEntryDTO {
+    /// The Today entry for a habit that was just created here: nothing logged
+    /// yet, and treated as planned so it appears in the main list rather than
+    /// under "Also available".
+    public static func fresh(_ habit: HabitDTO) -> HabitTodayEntryDTO {
+        HabitTodayEntryDTO(
+            habit: habit,
+            repsToday: 0,
+            doneThroughDay: 0,
+            weekTotal: 0,
+            credit: 0,
+            pace: nil,
+            plannedToday: true,
+            recentDays: nil,
+        )
+    }
+
     /// A copy with today's reps adjusted by `delta` (today + week totals,
     /// floored at 0 and capped at the daily target for daily/multi-daily).
     public func adjustingReps(by delta: Int) -> HabitTodayEntryDTO {
