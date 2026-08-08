@@ -206,6 +206,10 @@ final class AppModel {
         startQueue()
         do {
             let me = try await api.me()
+            if Self.lastUserId != me.user.id {
+                store.clear()
+                Self.lastUserId = me.user.id
+            }
             session = .loggedIn(me.user, me.settings)
         } catch APIClientError.unauthorized {
             Keychain.deleteToken()
@@ -226,8 +230,23 @@ final class AppModel {
         Keychain.saveToken(auth.token)
         await api.setToken(auth.token)
         let me = try await api.me()
+        // The disk cache never evicts, and a 401 deliberately does not clear it
+        // (queued writes have to survive an expired session). So a *different*
+        // account signing in on this device would paint the previous user's
+        // habits and tasks from cache before the first fetch returned. Signing
+        // in as someone else drops the cache.
+        if Self.lastUserId != me.user.id {
+            store.clear()
+            Self.lastUserId = me.user.id
+        }
         session = .loggedIn(me.user, me.settings)
         startQueue()
+    }
+
+    /// Which account the on-disk cache belongs to.
+    private static var lastUserId: String? {
+        get { UserDefaults.standard.string(forKey: "jarvis.lastUserId") }
+        set { UserDefaults.standard.set(newValue, forKey: "jarvis.lastUserId") }
     }
 
     @MainActor
