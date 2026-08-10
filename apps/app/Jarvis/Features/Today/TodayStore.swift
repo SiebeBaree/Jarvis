@@ -18,7 +18,7 @@ final class TodayStore {
     /// How far back the day pager reaches: today and the three days before it.
     /// Far enough to catch up on a weekend, short enough that the score stays
     /// a record of what happened rather than something you fill in later.
-    static let reachableDays = 4
+    static let reachableDays = 7
 
     private(set) var day: LoadState<DayPayload> = .idle
     /// Payloads for past days, keyed by dayKey. Only today's lives in `day`,

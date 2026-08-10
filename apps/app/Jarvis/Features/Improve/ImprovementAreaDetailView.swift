@@ -151,7 +151,7 @@ struct ImprovementAreaDetailView: View {
             Text("No check-ins yet")
                 .font(.headlineJ)
                 .foregroundStyle(Color.textPrimary)
-            Text("Take the first photo — it becomes the baseline J.A.R.V.I.S. compares future weeks against.")
+            Text("Take the first photo. It becomes the baseline every later week is compared against.")
                 .font(.subheadJ)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)

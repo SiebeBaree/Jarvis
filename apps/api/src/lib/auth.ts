@@ -8,7 +8,7 @@ import { ApiError } from "./http";
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 if (!PEPPER) {
   console.warn(
-    "AUTH_PEPPER is not set — password hashes created now will stop verifying if a pepper is added later.",
+    "AUTH_PEPPER is not set. Password hashes created now will stop verifying if a pepper is added later.",
   );
 }
 

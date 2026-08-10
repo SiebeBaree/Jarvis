@@ -90,7 +90,7 @@ struct AreasEditorView: View {
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
-            Text("Habits linked to this area keep working — they just lose their grouping.")
+            Text("Habits linked to this area keep working. They just lose their grouping.")
         }
         .task { await fetch() }
     }

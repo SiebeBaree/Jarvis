@@ -294,7 +294,7 @@ struct HabitsView: View {
         EmptyState(
             symbol: "repeat",
             title: "No habits yet",
-            message: "Type a name above and press return. Daily by default — tap the chips to make it several times a day, or a weekly target.",
+            message: "Type a name above and press return. Daily by default. Tap the chips to make it several times a day, or a weekly target.",
             tint: ItemColor.violet.color,
         )
     }

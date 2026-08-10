@@ -190,7 +190,7 @@ struct SettingsView: View {
 
     private var email: String {
         if case .loggedIn(let user, _) = model.session { return user.email }
-        return "—"
+        return Placeholder.noValue
     }
 
     private var weightsLabel: String {

@@ -165,7 +165,7 @@ struct ScoreBreakdownSheet: View {
             }
 
             if entries.isEmpty {
-                Text("No tasks due — component skipped")
+                Text("No tasks due, so this part is skipped")
                     .font(.subheadJ)
                     .foregroundStyle(Color.textTertiary)
             } else {
@@ -226,7 +226,7 @@ struct ScoreBreakdownSheet: View {
             }
 
             if entries.isEmpty {
-                Text("No active habits — component skipped")
+                Text("No active habits, so this part is skipped")
                     .font(.subheadJ)
                     .foregroundStyle(Color.textTertiary)
             } else {
@@ -290,7 +290,7 @@ struct ScoreBreakdownSheet: View {
                     .font(.subheadJ)
                     .foregroundStyle(Color.textSecondary)
             } else {
-                Text("Not set — score renormalized over \(Int(payload.score.applicableWeight)) pts")
+                Text("Not set, so the score is spread over \(Int(payload.score.applicableWeight)) pts")
                     .font(.subheadJ)
                     .foregroundStyle(Color.textTertiary)
             }
@@ -381,7 +381,7 @@ struct ScoreBreakdownSheet: View {
     }
 
     private func summaryLine(count: String?, points: Double?, weight: Double) -> String {
-        let pointsText = points.map { "\(TodayView.formatPoints($0))/\(TodayView.formatPoints(weight))" } ?? "—"
+        let pointsText = points.map { "\(TodayView.formatPoints($0))/\(TodayView.formatPoints(weight))" } ?? Placeholder.noValue
         if let count { return "\(count) · \(pointsText)" }
         return pointsText
     }

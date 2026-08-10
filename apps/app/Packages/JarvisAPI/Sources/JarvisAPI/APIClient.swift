@@ -9,7 +9,7 @@ public enum APIClientError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .unauthorized: "Session expired — please sign in again."
+        case .unauthorized: "Session expired. Please sign in again."
         case .api(_, let message, _): message
         case .network: "Could not reach the server. Check your connection."
         case .decoding: "Unexpected response from the server."

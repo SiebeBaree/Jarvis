@@ -167,7 +167,7 @@ struct CheckinFlowView: View {
             if ok {
                 advance()
             } else {
-                uploadError = store.mutationError ?? "Upload failed — try again."
+                uploadError = store.mutationError ?? "Upload failed. Try again."
             }
         }
     }

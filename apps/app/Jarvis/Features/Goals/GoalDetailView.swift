@@ -132,7 +132,7 @@ struct GoalDetailView: View {
                 Text("Where you are")
                     .font(.captionJ)
                     .foregroundStyle(Color.textTertiary)
-                Text(GoalValueFormat.summary(goal) ?? "—")
+                Text(GoalValueFormat.summary(goal) ?? Placeholder.noValue)
                     .font(.monoJ)
                     .monospacedDigit()
                     .foregroundStyle(Color.textPrimary)

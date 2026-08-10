@@ -57,7 +57,7 @@ final class ImproveStore {
     func uploadCheckin(areaId: String, imageData: Data) async -> Bool {
         guard let model, !uploadingAreaIds.contains(areaId) else { return false }
         guard let jpeg = ImageDownscaler.jpegData(from: imageData) else {
-            mutationError = "That image could not be read — try a different photo."
+            mutationError = "That image could not be read. Try a different photo."
             return false
         }
         uploadingAreaIds.insert(areaId)

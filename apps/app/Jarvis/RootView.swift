@@ -58,7 +58,7 @@ enum AppSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .today: "Today"
+        case .today: "Overview"
         case .tasks: "Tasks"
         case .habits: "Habits"
         case .progress: "Progress"
@@ -118,7 +118,6 @@ struct MainShell: View {
             List(selection: $selection) {
                 ForEach(AppSection.allCases) { section in
                     Label(section.title, systemImage: section.icon)
-                        .font(.headlineJ)
                         .tag(section)
                 }
             }

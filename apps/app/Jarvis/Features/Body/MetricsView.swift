@@ -246,7 +246,7 @@ struct MetricsView: View {
 
     private var emptyState: some View {
         VStack(spacing: Space.md) {
-            Text("Track anything — weight, body fat, whatever matters")
+            Text("Track anything: weight, body fat, whatever matters")
                 .font(.headlineJ)
                 .foregroundStyle(Color.textPrimary)
                 .multilineTextAlignment(.center)

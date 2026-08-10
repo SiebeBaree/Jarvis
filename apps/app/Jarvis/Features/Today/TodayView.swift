@@ -2,13 +2,14 @@ import DesignSystem
 import JarvisAPI
 import SwiftUI
 
-/// The Today screen: score header, feel score, tasks, habits — for today and
-/// the three days behind it.
+/// The Overview screen: score header, feel score, tasks and habits, for today
+/// and the six days behind it.
 ///
 /// The back-days are the point of the horizontal pager: the day you forgot to
 /// rate is still there tomorrow, so a missed evening doesn't turn into a
-/// permanent hole in the record. Past pages are read-only for tasks (they are
-/// already scored) but fully editable for the feel score and habit reps.
+/// permanent hole in the record. A full week back means a weekend away can be
+/// filled in on Monday. Past pages are read-only for tasks (they are already
+/// scored) but fully editable for the feel score and habit reps.
 struct TodayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -36,7 +37,7 @@ struct TodayView: View {
             }
         }
         .background(Color.bgCanvas)
-        .navigationTitle("Today")
+        .navigationTitle("Overview")
         #if os(iOS)
         // A large title spent ~90pt restating what the tab bar already says,
         // on the one screen where vertical space is the scarce resource.
@@ -139,9 +140,11 @@ struct TodayView: View {
     @ViewBuilder
     private var pages: some View {
         #if os(iOS)
-        // Swiping between days is the native gesture on a phone.
+        // Swiping between days is the native gesture on a phone. Pages run
+        // oldest to newest so the gesture matches the strip above them:
+        // swiping right moves left along the strip, into the past.
         TabView(selection: Binding(get: { visibleDayKey ?? "" }, set: { selectedDay = $0 })) {
-            ForEach(store.reachableDayKeys, id: \.self) { dayKey in
+            ForEach(store.reachableDayKeys.reversed(), id: \.self) { dayKey in
                 dayPage(dayKey)
                     .tag(dayKey)
             }
@@ -183,60 +186,69 @@ struct TodayView: View {
     }
     #endif
 
-    /// Day strip. It is the FIRST ROW OF THE PAGE, not a bar above it: fixed
-    /// content at the top edge makes the macOS window toolbar paint its
-    /// permanent opaque band, and four full-width two-line buttons were a lot
-    /// of chrome to carry on a screen you open twenty times a day. Four small
-    /// capsules instead — day, score, and an amber dot on a day still missing
-    /// its feel score, which is the entire reason you would go back at all.
+    /// The week strip: today plus the six days behind it, oldest on the left.
+    ///
+    /// Seven single-line "Today 52" capsules do not fit an iPhone, so each day
+    /// is a two-line cell (weekday over score) and the row divides the full
+    /// content width between them. That also answers the Mac case: the strip
+    /// spans the column instead of bunching up on the left with dead space
+    /// after it.
     private var dayStrip: some View {
         HStack(spacing: Space.xs) {
             ForEach(store.reachableDayKeys.reversed(), id: \.self) { dayKey in
                 dayCapsule(dayKey)
+                    .frame(maxWidth: .infinity)
             }
-            Spacer(minLength: 0)
         }
     }
 
     private func dayCapsule(_ dayKey: DayKey) -> some View {
         let isSelected = dayKey == visibleDayKey
         let isToday = dayKey == store.payload?.dayKey
-        // Today is unrated until the evening — a warning dot on it all day
+        // Today is unrated until the evening, so a warning dot on it all day
         // would just be wallpaper.
         let needsRating = !isToday && store.payload(for: dayKey).map { $0.mood == nil } == true
+        let score = scoreLabel(dayKey)
 
         return Button {
             Haptics.play(.light)
             withJarvisAnimation(Motion.quick) { selectedDay = dayKey }
         } label: {
-            HStack(spacing: 5) {
+            VStack(spacing: 1) {
                 Text(dayLabel(dayKey))
-                    .font(.captionJ)
+                    .font(.microJ)
                     .foregroundStyle(isSelected ? Color.textPrimary : Color.textTertiary)
-                Text(scoreLabel(dayKey))
-                    .font(.monoJ)
-                    .foregroundStyle(isSelected ? Color.accentPrimary : Color.textTertiary)
-                if needsRating {
-                    Circle()
-                        .fill(Color.warning)
-                        .frame(width: 5, height: 5)
+                HStack(spacing: 3) {
+                    Text(score)
+                        .font(.monoJ)
+                        .foregroundStyle(isSelected ? Color.accentPrimary : Color.textTertiary)
+                    if needsRating {
+                        Circle()
+                            .fill(Color.warning)
+                            .frame(width: 4, height: 4)
+                    }
                 }
+                // Fixed so an unscored day does not sit shorter than its
+                // neighbours and make the row look ragged.
+                .frame(height: 15)
             }
-            .padding(.horizontal, Space.md)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
             .background {
                 if isSelected {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                         .fill(Color.bgSurface)
                         .jarvisShadow(.card)
                 }
             }
-            .contentShape(Capsule())
+            .contentShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         }
         .buttonStyle(.plain)
         .jarvisAnimation(Motion.quick, value: isSelected)
         .accessibilityLabel(
-            "\(dayLabel(dayKey)), score \(scoreLabel(dayKey))\(needsRating ? ", not rated" : "")",
+            "\(dayLabel(dayKey))\(score.isEmpty ? ", not scored" : ", score \(score)")\(needsRating ? ", not rated" : "")",
         )
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
@@ -253,7 +265,7 @@ struct TodayView: View {
     }
 
     private func scoreLabel(_ dayKey: DayKey) -> String {
-        guard let total = store.payload(for: dayKey)?.score.total else { return "—" }
+        guard let total = store.payload(for: dayKey)?.score.total else { return "" }
         return "\(Int(total.rounded()))"
     }
 
@@ -431,12 +443,12 @@ struct TodayView: View {
         if isToday, DayKeyMath.isLateNight() {
             captionRow(
                 symbol: "moon.stars",
-                text: "Late night — still counts for \(weekdayName(payload.dayKey))",
+                text: "Late night. Still counts for \(weekdayName(payload.dayKey))",
             )
         } else if !isToday {
             captionRow(
                 symbol: "arrow.uturn.backward",
-                text: "Catching up — feel and habits are still editable.",
+                text: "Catching up. Feel and habits are still editable.",
             )
         }
     }
@@ -714,11 +726,12 @@ private struct MoodCard: View {
                 Text(isSet ? label : "Not set")
                     .font(.subheadJ)
                     .foregroundStyle(isSet ? Color.textPrimary : Color.textTertiary)
-                Text(isSet ? "\(Int(value.rounded()))" : "—")
-                    .font(.monoJ)
-                    .foregroundStyle(isSet ? Color.textSecondary : Color.textTertiary)
-                    .frame(minWidth: 22, alignment: .trailing)
-                    .monospacedDigit()
+                if isSet {
+                    Text("\(Int(value.rounded()))")
+                        .font(.monoJ)
+                        .foregroundStyle(Color.textSecondary)
+                        .frame(minWidth: 22, alignment: .trailing)
+                }
             }
             MoodSlider(value: $value, isSet: isSet, isDragging: $isDragging, onCommit: onCommit)
         }

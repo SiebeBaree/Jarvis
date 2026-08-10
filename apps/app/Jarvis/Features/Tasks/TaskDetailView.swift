@@ -266,7 +266,7 @@ struct TaskDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear due date")
             } else {
-                Button("None — set date") {
+                Button("Set a date") {
                     patch(["dueDate": .string(store.todayKey)]) { $0.with(dueDate: store.todayKey) }
                 }
                 .buttonStyle(.jarvisGhost)
@@ -300,7 +300,7 @@ struct TaskDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear time")
             } else {
-                Button("None — set time") {
+                Button("Set a time") {
                     patch(["dueTime": .string("09:00")]) { $0.with(dueTime: "09:00") }
                 }
                 .buttonStyle(.jarvisGhost)
@@ -373,7 +373,7 @@ struct TaskDetailView: View {
                 Image(systemName: "arrow.trianglehead.2.clockwise")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.textSecondary)
-                Text("Repeats — edit the recurring task")
+                Text("Repeats: edit the recurring task")
                     .font(.subheadJ)
                     .foregroundStyle(Color.textSecondary)
                 Spacer(minLength: 0)

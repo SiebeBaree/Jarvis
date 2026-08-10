@@ -235,7 +235,7 @@ struct HabitEditorView: View {
                     value: $timesPerDay,
                     range: 2...10,
                 )
-                caption("Partial reps earn partial credit — 1 of 2 is 50%.")
+                caption("Partial reps earn partial credit. 1 of 2 is 50%.")
             case .weeklyFrequency:
                 stepper(
                     label: "Times a week",
@@ -246,7 +246,7 @@ struct HabitEditorView: View {
             }
 
             if isEditing {
-                caption("The frequency type is locked — changing it would rewrite this habit's history.")
+                caption("The frequency type is locked. Changing it would rewrite this habit's history.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,7 +283,7 @@ struct HabitEditorView: View {
 
     private var plannedDaysCard: some View {
         VStack(alignment: .leading, spacing: Space.md) {
-            SectionHeader("Suggested days", subtitle: "Never penalised — only the weekly total counts")
+            SectionHeader("Suggested days", subtitle: "Never penalised. Only the weekly total counts")
             let letters = ["M", "T", "W", "T", "F", "S", "S"]
             HStack(spacing: Space.xs) {
                 ForEach(1...7, id: \.self) { day in

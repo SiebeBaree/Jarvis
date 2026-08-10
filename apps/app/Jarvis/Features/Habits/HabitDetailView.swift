@@ -196,7 +196,7 @@ struct HabitDetailView: View {
 
             plannedDaysRow(habit)
 
-            Text("Planned days are suggestions — only the weekly total counts.")
+            Text("Planned days are suggestions. Only the weekly total counts.")
                 .font(.captionJ)
                 .foregroundStyle(Color.textTertiary)
         }
@@ -210,11 +210,11 @@ struct HabitDetailView: View {
         case .weekDone:
             return "Week complete"
         case .onPace:
-            return "On pace — \(target - total) more by Sunday"
+            return "On pace. \(target - total) more by Sunday"
         case .behind:
-            return "Behind — need \(target - total) in \(remainingDays) day\(remainingDays == 1 ? "" : "s")"
+            return "Behind. Need \(target - total) in \(remainingDays) day\(remainingDays == 1 ? "" : "s")"
         case .outOfReach:
-            return "Out of reach this week — every rep still counts toward the total"
+            return "Out of reach this week. Every rep still counts toward the total"
         }
     }
 
@@ -306,19 +306,19 @@ struct HabitDetailView: View {
             spacing: Space.md,
         ) {
             statTile(
-                value: loaded.map { "\($0.streak.current) \($0.streak.unit)" } ?? "—",
+                value: loaded.map { "\($0.streak.current) \($0.streak.unit)" } ?? Placeholder.noValue,
                 label: "Current streak",
             )
             statTile(
-                value: loaded.map { "\($0.streak.best) \($0.streak.unit)" } ?? "—",
+                value: loaded.map { "\($0.streak.best) \($0.streak.unit)" } ?? Placeholder.noValue,
                 label: "Best",
             )
             statTile(
-                value: rate.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
+                value: rate.map { "\(Int(($0 * 100).rounded()))%" } ?? Placeholder.noValue,
                 label: rateLabel,
             )
             statTile(
-                value: loaded.map { "\($0.totalReps)" } ?? "—",
+                value: loaded.map { "\($0.totalReps)" } ?? Placeholder.noValue,
                 label: "Total reps",
             )
         }

@@ -27,7 +27,7 @@ struct AreaEditorView: View {
                     TextField("What does better look like?", text: $betterLooksLike, axis: .vertical)
                         .lineLimit(2...4)
                 } footer: {
-                    Text("J.A.R.V.I.S. uses \"what better looks like\" to judge your weekly photos — the more concrete, the more useful its feedback.")
+                    Text("Describe what better looks like. The more concrete it is, the easier a new photo is to judge against it.")
                         .font(.captionJ)
                         .foregroundStyle(Color.textTertiary)
                 }
@@ -91,7 +91,7 @@ struct AreaEditorView: View {
             if ok {
                 dismiss()
             } else {
-                errorText = store.mutationError ?? "Could not save — try again."
+                errorText = store.mutationError ?? "Could not save. Try again."
             }
         }
     }

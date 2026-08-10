@@ -57,8 +57,8 @@ public struct ScoreRing: View {
 
             VStack(spacing: -2) {
                 HStack(alignment: .top, spacing: 1) {
-                    Text(value.map(String.init) ?? "—")
-                        .font(.system(size: size * 0.34, weight: .bold, design: .rounded))
+                    Text(value.map(String.init) ?? Placeholder.noValue)
+                        .font(.system(size: size * 0.32, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .contentTransition(.numericText(value: Double(value ?? 0)))
                     if value != nil {
@@ -121,7 +121,7 @@ public struct ComponentBar: View {
                     .font(.subheadStrongJ)
                     .foregroundStyle(Color.textSecondary)
                 Spacer(minLength: Space.sm)
-                Text(points.map { "\(Self.format($0))/\(Self.format(weight))" } ?? "—")
+                Text(points.map { "\(Self.format($0))/\(Self.format(weight))" } ?? Placeholder.noValue)
                     .font(.monoJ)
                     .foregroundStyle(points == nil ? Color.textTertiary : Color.textPrimary)
             }

@@ -28,7 +28,7 @@ struct SyncStatusBar: View {
                     icon: model.queue.isOffline ? "wifi.slash" : "arrow.triangle.2.circlepath",
                     tint: .textSecondary,
                     text: model.queue.isOffline
-                        ? "Offline — \(pendingCount) change\(pendingCount == 1 ? "" : "s") will sync when you reconnect"
+                        ? "Offline. \(pendingCount) change\(pendingCount == 1 ? "" : "s") will sync when you reconnect"
                         : "Syncing \(pendingCount) change\(pendingCount == 1 ? "" : "s")…",
                     action: nil,
                 )

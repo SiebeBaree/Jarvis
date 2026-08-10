@@ -391,7 +391,7 @@ struct TrendsView: View {
     @ViewBuilder
     private func weeklyContent(_ data: TrendsStore.WeeklyAverages) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.sm) {
-            Text(data.currentAvg.map { "\(Int($0.rounded()))" } ?? "—")
+            Text(data.currentAvg.map { "\(Int($0.rounded()))" } ?? Placeholder.noValue)
                 .font(.title1J)
                 .monospacedDigit()
                 .foregroundStyle(Color.textPrimary)
@@ -500,11 +500,11 @@ struct TrendsView: View {
                     .font(.subheadJ)
                     .foregroundStyle(Color.textPrimary)
                 Spacer(minLength: Space.sm)
-                Text(average.map { "\(TodayView.formatPoints($0)) / \(TodayView.formatPoints(weight))" } ?? "—")
+                Text(average.map { "\(TodayView.formatPoints($0)) / \(TodayView.formatPoints(weight))" } ?? Placeholder.noValue)
                     .font(.monoJ)
                     .monospacedDigit()
                     .foregroundStyle(average == nil ? Color.textTertiary : Color.textPrimary)
-                Text(fraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "—")
+                Text(fraction.map { "\(Int(($0 * 100).rounded()))%" } ?? Placeholder.noValue)
                     .font(.captionJ)
                     .monospacedDigit()
                     .foregroundStyle(Color.textTertiary)

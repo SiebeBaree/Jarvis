@@ -165,7 +165,7 @@ struct ImproveView: View {
             Text("What do you want to improve?")
                 .font(.title2J)
                 .foregroundStyle(Color.textPrimary)
-            Text("Posture, clothing, teeth, skin — define an area, take one photo a week, and J.A.R.V.I.S. tells you honestly what is changing.")
+            Text("Posture, clothing, teeth, skin. Define an area and take one photo a week, so a month of small changes is something you can actually see.")
                 .font(.bodyJ)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)

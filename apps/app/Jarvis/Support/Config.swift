@@ -8,7 +8,7 @@ enum Config {
             let raw = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String,
             let url = URL(string: raw), url.scheme != nil
         else {
-            fatalError("API_BASE_URL missing or invalid in Info.plist — check Config/*.xcconfig")
+            fatalError("API_BASE_URL missing or invalid in Info.plist. Check Config/*.xcconfig")
         }
         return url
     }

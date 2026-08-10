@@ -32,7 +32,6 @@ struct TasksView: View {
     var body: some View {
         List {
             Group {
-                controlsRow
                 categoryChips
                 // Always there, above the tasks — adding one is typing, not
                 // opening something first.
@@ -60,8 +59,18 @@ struct TasksView: View {
         .navigationTitle("Tasks")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            segmentPicker
+                .padding(.horizontal, PageMargin.standard)
+                .padding(.top, Space.xs)
+                .padding(.bottom, Space.sm)
+                .background(Color.bgCanvas)
+        }
         #endif
         .toolbar {
+            #if os(macOS)
+            ToolbarItem(placement: .principal) { segmentPicker }
+            #endif
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     composerActive = true
@@ -147,7 +156,7 @@ struct TasksView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Tasks in this category are kept — they just lose the category.")
+            Text("Tasks in this category are kept. They just lose the category.")
         }
     }
 
@@ -186,11 +195,26 @@ struct TasksView: View {
     }
     #endif
 
-    // MARK: - Controls (first list row)
+    // MARK: - Segment picker
+    //
+    // Lives in the toolbar on macOS and a top safe-area inset on iOS, matching
+    // Progress exactly. It also keeps working in every load state, which a
+    // first-scrolling-row picker does not.
 
-    private var controlsRow: some View {
-        ChipPicker(TasksStore.Segment.allCases, selection: $store.segment) { $0.title }
-            .padding(.top, Space.xs)
+    private var segmentPicker: some View {
+        ChipPicker(
+            TasksStore.Segment.allCases,
+            selection: $store.segment,
+            fillsWidth: fillsWidth,
+        ) { $0.title }
+    }
+
+    private var fillsWidth: Bool {
+        #if os(macOS)
+        false
+        #else
+        true
+        #endif
     }
 
     // MARK: - Category pages (TickTick-style filter chips)
@@ -302,7 +326,7 @@ struct TasksView: View {
             let overdue = store.overdueTasks
             let today = store.todayTasks
             if overdue.isEmpty && today.isEmpty {
-                emptyState("No tasks today — add one")
+                emptyState("No tasks today")
             } else {
                 if !overdue.isEmpty {
                     Section {
@@ -344,7 +368,7 @@ struct TasksView: View {
         case .all:
             let tasks = store.allTasks
             if tasks.isEmpty {
-                emptyState("No tasks — add one")
+                emptyState("No tasks yet")
             } else {
                 ForEach(tasks) { task in
                     row(for: task)

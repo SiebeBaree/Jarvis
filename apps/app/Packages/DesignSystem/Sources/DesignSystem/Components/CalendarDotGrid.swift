@@ -224,9 +224,9 @@ private struct WeekResultCell: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(Color.success)
         case .missed:
-            Text("—")
-                .font(.monoJ)
-                .foregroundStyle(Color.textTertiary)
+            Circle()
+                .strokeBorder(Color.borderStrong, lineWidth: 1)
+                .frame(width: 9, height: 9)
         case .live(let done, let target):
             Text("\(done)/\(target)")
                 .font(.monoJ)
@@ -258,7 +258,7 @@ struct PieSlice: Shape {
     }
 }
 
-#Preview("CalendarDotGrid — daily habit") {
+#Preview("CalendarDotGrid: daily habit") {
     CalendarDotGrid(
         year: 2026,
         month: 7,
@@ -277,7 +277,7 @@ struct PieSlice: Shape {
     .background(Color.bgSurface)
 }
 
-#Preview("CalendarDotGrid — weekly habit") {
+#Preview("CalendarDotGrid: weekly habit") {
     CalendarDotGrid(
         year: 2026,
         month: 7,
