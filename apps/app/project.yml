@@ -18,10 +18,14 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: DW92YAHZVK
   configs:
     Debug:
-      # Ad-hoc signing so local/CLI builds work without a development team.
+      # Ad-hoc signing so simulator and local Mac builds work without touching
+      # the developer account. Real iPhones need a real certificate, so device
+      # builds fall back to the automatic "Apple Development" identity.
       CODE_SIGN_IDENTITY: "-"
+      "CODE_SIGN_IDENTITY[sdk=iphoneos*]": Apple Development
 
 targets:
   Jarvis:
