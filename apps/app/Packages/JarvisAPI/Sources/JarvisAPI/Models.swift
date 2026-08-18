@@ -29,6 +29,9 @@ public struct SettingsDTO: Codable, Sendable, Equatable {
     public let weekStartsOn: Int
     public let scoreWeights: ScoreWeights
     public let moodScaleMax: Int
+    public let checkinNotificationsEnabled: Bool
+    /// Hour of the day, 0-23, in `timezone`.
+    public let checkinNotificationHour: Int
 }
 
 public struct MeResponse: Codable, Sendable {

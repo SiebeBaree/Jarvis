@@ -425,3 +425,44 @@ door, which is the single most useful thing either feature does.
 - Surfacing the shopping list on Today when it has unchecked items. Probably
   the best remaining answer to "I always forget", but it changes a screen that
   already works, so it is a deliberate follow-up rather than part of this pass.
+
+## Daily check-in push notifications (2026-08-18)
+
+`docs/spec.md:23` says "Notifications: None for now (free Apple account; user
+declined local notifications)" and `:86` anticipated the way out: "adding push
+later only needs a new `devices` table". The developer account now exists, so
+this ships that. The `CheckinPromptCard` on Overview stays: it is what nudges
+someone who already opened the app, and this reaches the phone that did not.
+
+### Scope
+
+| Decision | Rationale |
+|---|---|
+| One notification a day, at a user-chosen hour, only when today has no mood entry | The whole request was a nudge without notification overload. Mood is the deliberate end-of-day act, so finishing one task at noon does not count as having closed the day |
+| iPhone only, and the Mac build never registers | The Mac is where the app is already open. Enforced structurally: all push code sits behind `#if os(iOS)` and macOS gets no `aps-environment` entitlement, so it cannot register even by accident |
+| Text is server-templated, not AI | The AI layer was removed on 2026-07-29 and stays removed. A priority ladder (first entry, rough day yesterday, overdue tasks, live streak, busy day, good day yesterday, generic) picks the most specific true thing, which is most of what an LLM would have added here for none of the cost or latency |
+| The variant rotates on a hash of the dayKey, not at random | The cron can retry within a day. A random variant would make the retry a second, different notification |
+| Hour and on/off live on `settings`, not per device | One person, one phone; the nudge is a fact about them and their timezone, and the cron already loads settings to work out the local hour |
+
+### Mechanics
+
+| Decision | Rationale |
+|---|---|
+| Hourly Vercel cron that mostly does nothing | The send hour is a user setting in their own timezone; the schedule is UTC. The route compares `localHour(settings, now)` itself, so the schedule needs no timezone awareness and changing the hour needs no redeploy |
+| The day is claimed in `notification_log` before sending | The neon-http driver has no transactions, and localhost shares this database with production, so a developer curling the route must not double-send. An insert that conflicts means the day is taken |
+| A failed send deletes the claim | Keeping a failed row would cost the whole day for one transient APNs blip. The unclaimed window is milliseconds against an hourly cadence. A send that throws is caught for the same reason: an escaping exception would leave the day claimed and unsent forever |
+| APNs over `node:http2`, not `fetch` | APNs is HTTP/2 only and Node's global fetch negotiates HTTP/1.1. undici's `allowH2` depends on whichever version Vercel bundles. One push a day does not justify a push SDK |
+| `devices.environment` (`sandbox` \| `production`) travels with the token | `Config/Debug.xcconfig` points physical-iPhone Debug builds at the production API while their token is a sandbox one, so the server cannot infer the host from its own environment |
+| Registration bypasses the mutation queue | A device token is a fact about this install, not user data. A queued token replayed after sign-out would re-arm a device that was just signed out |
+| iOS gets its own hand-written `Jarvis.iOS.entitlements` via `CODE_SIGN_ENTITLEMENTS[sdk=iphone*]` | XcodeGen generates one shared entitlements file for the single multiplatform target. Putting `aps-environment` in it would break the ad-hoc signed Mac build |
+
+### Not done
+
+- No notification when a *weekly* photo check-in is due. The daily nudge was
+  the ask, and a second recurring notification is exactly the overload this
+  was meant to avoid.
+- No deep link to a specific day. Tapping opens Overview, which is where
+  today's mood is set.
+- Delivery itself is unverified end to end: the message, the cron, the
+  registration flow and the tap routing were all exercised against the real
+  database and a simulator, but an actual APNs send needs the `.p8` key.

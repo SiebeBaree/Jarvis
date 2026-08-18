@@ -5,6 +5,11 @@ struct JarvisApp: App {
     @State private var model = AppModel()
     @AppStorage("appearanceMode") private var appearanceMode = "system"
 
+    #if os(iOS)
+    // Only the phone registers for push, so only the phone needs a delegate.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
+
     private var colorScheme: ColorScheme? {
         switch appearanceMode {
         case "light": .light

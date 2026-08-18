@@ -96,12 +96,21 @@ async function nudgeUser(
 
   let delivered = 0;
   for (const device of active) {
-    const result = await sendPush(device.deviceToken, device.environment, {
-      title: nudge.title,
-      body: nudge.body,
-      kind: KIND,
-      dayKey,
-    });
+    // A throw here (missing APNs credentials, most likely) has to be caught
+    // rather than escape: an exception would leave the day claimed but unsent,
+    // and no later run could take it.
+    let result: Awaited<ReturnType<typeof sendPush>>;
+    try {
+      result = await sendPush(device.deviceToken, device.environment, {
+        title: nudge.title,
+        body: nudge.body,
+        kind: KIND,
+        dayKey,
+      });
+    } catch (err) {
+      console.error(`APNs send threw for device ${device.id}:`, err);
+      continue;
+    }
     if (result.ok) {
       delivered++;
       continue;

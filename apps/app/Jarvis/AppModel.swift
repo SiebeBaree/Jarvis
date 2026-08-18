@@ -36,6 +36,22 @@ final class AppModel {
 
     init() {
         self.api = APIClient(baseURL: Config.apiBaseURL)
+        #if os(iOS)
+        // The delegate receives APNs callbacks before any view exists, so the
+        // push manager needs its way back to the API client from the start.
+        PushManager.shared.model = self
+        #endif
+    }
+
+    /// Re-register this device if the user has the nudge switched on. Called
+    /// after every sign-in: it refreshes `lastSeenAt` and catches a token that
+    /// APNs rotated while the app was closed.
+    @MainActor
+    private func syncPushRegistration() async {
+        #if os(iOS)
+        guard settings?.checkinNotificationsEnabled == true else { return }
+        await PushManager.shared.registerIfAuthorized()
+        #endif
     }
 
     /// Starts the outbox. Called once the session is known so queued writes
@@ -211,6 +227,7 @@ final class AppModel {
                 Self.lastUserId = me.user.id
             }
             session = .loggedIn(me.user, me.settings)
+            await syncPushRegistration()
         } catch APIClientError.unauthorized {
             Keychain.deleteToken()
             await api.setToken(nil)
@@ -241,6 +258,7 @@ final class AppModel {
         }
         session = .loggedIn(me.user, me.settings)
         startQueue()
+        await syncPushRegistration()
     }
 
     /// Which account the on-disk cache belongs to.
@@ -251,6 +269,10 @@ final class AppModel {
 
     @MainActor
     func signOut() async {
+        #if os(iOS)
+        // Before the logout call, because revoking needs the session token.
+        await PushManager.shared.revokeCurrentToken()
+        #endif
         _ = try? await api.logout()
         Keychain.deleteToken()
         await api.setToken(nil)

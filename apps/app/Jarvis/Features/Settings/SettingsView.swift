@@ -14,11 +14,19 @@ struct SettingsView: View {
     @State private var confirmingReset = false
     @State private var isResetting = false
     @State private var resetError: String?
+    #if os(iOS)
+    @State private var push = PushManager.shared
+    @State private var isUpdatingNotifications = false
+    @State private var notificationsError: String?
+    #endif
 
     var body: some View {
         Form {
             accountSection
             appearanceSection
+            #if os(iOS)
+            notificationsSection
+            #endif
             scoringSection
             planSection
             dangerSection
@@ -84,6 +92,103 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
         }
     }
+
+    #if os(iOS)
+    private var notificationsSection: some View {
+        Section {
+            if push.authorizationStatus == .denied {
+                Text("Notifications are turned off for Jarvis in iOS Settings.")
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textSecondary)
+                Button("Open Settings") {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
+            } else {
+                Toggle("Daily check-in reminder", isOn: notificationsEnabledBinding)
+                    .disabled(isUpdatingNotifications)
+                if notificationsEnabled {
+                    Picker("Time", selection: notificationHourBinding) {
+                        ForEach(0..<24, id: \.self) { hour in
+                            Text(hourLabel(hour)).tag(hour)
+                        }
+                    }
+                    .disabled(isUpdatingNotifications)
+                }
+            }
+            if let notificationsError {
+                Text(notificationsError)
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.danger)
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("One notification at this hour, and only on days you have not logged a mood yet. This phone only.")
+                .font(.captionJ)
+                .foregroundStyle(Color.textTertiary)
+        }
+        .task { await push.refreshAuthorizationStatus() }
+    }
+
+    private var notificationsEnabled: Bool {
+        model.settings?.checkinNotificationsEnabled ?? false
+    }
+
+    private var notificationsEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { notificationsEnabled },
+            set: { newValue in setNotifications(enabled: newValue) },
+        )
+    }
+
+    private var notificationHourBinding: Binding<Int> {
+        Binding(
+            get: { model.settings?.checkinNotificationHour ?? 20 },
+            set: { newValue in patchNotifications(["checkinNotificationHour": .int(newValue)]) },
+        )
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        String(format: "%02d:00", hour)
+    }
+
+    /// Turning it on asks the system first: without permission the server would
+    /// be sending into nothing.
+    private func setNotifications(enabled: Bool) {
+        guard enabled else {
+            patchNotifications(["checkinNotificationsEnabled": .bool(false)])
+            return
+        }
+        isUpdatingNotifications = true
+        notificationsError = nil
+        Task {
+            let granted = await push.enable()
+            guard granted else {
+                isUpdatingNotifications = false
+                notificationsError = "iOS did not allow notifications for Jarvis."
+                return
+            }
+            isUpdatingNotifications = false
+            patchNotifications(["checkinNotificationsEnabled": .bool(true)])
+        }
+    }
+
+    private func patchNotifications(_ patch: JSONObject) {
+        isUpdatingNotifications = true
+        notificationsError = nil
+        Task {
+            do {
+                _ = try await model.api.patchSettings(patch)
+                await model.refreshSettings()
+            } catch {
+                model.handle(error)
+                notificationsError = TodayStore.message(for: error)
+            }
+            isUpdatingNotifications = false
+        }
+    }
+    #endif
 
     private var scoringSection: some View {
         Section {

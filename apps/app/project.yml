@@ -42,6 +42,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "1" # iPhone only (no iPad)
         ENABLE_PREVIEWS: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Push is iPhone only. The generated entitlements file below is shared
+        # by both platforms, and adding aps-environment to it would break the
+        # ad-hoc signed Mac build, so iOS gets its own hand-written file.
+        # Xcode rewrites `development` to `production` when exporting a release
+        # build, which is why device rows carry their APNs environment.
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]": Jarvis/Jarvis.iOS.entitlements
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]": Jarvis/Jarvis.iOS.entitlements
     configFiles:
       Debug: Config/Debug.xcconfig
       Release: Config/Release.xcconfig
