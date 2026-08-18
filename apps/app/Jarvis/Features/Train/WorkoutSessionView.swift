@@ -567,43 +567,46 @@ private struct SetEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(exerciseName) {
-                    HStack {
-                        Text("Weight")
-                        Spacer()
-                        TextField("0", text: $weight)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
-                            #if os(iOS)
-                            .keyboardType(.decimalPad)
-                            #endif
-                        Text("kg").foregroundStyle(Color.textSecondary)
-                    }
-                    HStack {
-                        Text("Reps")
-                        Spacer()
-                        TextField("0", text: $reps)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
-                            #if os(iOS)
-                            .keyboardType(.numberPad)
-                            #endif
-                    }
-                    Toggle("Warm-up set", isOn: $isWarmup)
+            VStack(alignment: .leading, spacing: Space.xl) {
+                Text(exerciseName)
+                    .font(.title3J)
+                    .foregroundStyle(Color.textPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(alignment: .bottom, spacing: Space.lg) {
+                    CaptionedField(
+                        caption: "Weight",
+                        prompt: "0",
+                        text: $weight,
+                        width: 80,
+                        suffix: "kg",
+                    )
+                    CaptionedField(caption: "Reps", prompt: "0", text: $reps, width: 64)
+                    Spacer(minLength: 0)
                 }
-                Section {
-                    Button("Delete set", role: .destructive) {
-                        onDelete()
-                        dismiss()
-                    }
-                } footer: {
-                    Text("Warm-up sets are kept but left out of your volume and personal bests.")
-                        .font(.captionJ)
-                        .foregroundStyle(Color.textTertiary)
+
+                Toggle("Warm-up set", isOn: $isWarmup)
+                    .font(.bodyJ)
+                    .foregroundStyle(Color.textPrimary)
+
+                Text("Warm-up sets are kept but left out of your volume and personal bests.")
+                    .font(.captionJ)
+                    .foregroundStyle(Color.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Delete set", role: .destructive) {
+                    onDelete()
+                    dismiss()
                 }
+                .buttonStyle(.jarvisSecondary)
+                .frame(maxWidth: .infinity)
+
+                Spacer(minLength: 0)
             }
-            .formStyle(.grouped)
+            .padding(PageMargin.standard)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.bgCanvas)
             .navigationTitle("Set \(workoutSet.setIndex)")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -630,7 +633,7 @@ private struct SetEditorView: View {
             isWarmup = workoutSet.isWarmup
         }
         #if os(macOS)
-        .frame(minWidth: 380, minHeight: 300)
+        .frame(minWidth: 440, minHeight: 380)
         #endif
     }
 }

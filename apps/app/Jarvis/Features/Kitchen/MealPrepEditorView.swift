@@ -15,7 +15,7 @@ struct MealPrepEditorView: View {
     var editing: MealPrepDTO?
 
     @State private var name = ""
-    @State private var description = ""
+    @State private var summary = ""
     @State private var instructions = ""
     @State private var prepMinutes = ""
     @State private var portions = 4
@@ -48,19 +48,22 @@ struct MealPrepEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                photoSection
-                detailsSection
-                macrosSection
-                ingredientsSection
-                instructionsSection
-                if let errorText {
-                    Text(errorText)
-                        .font(.subheadJ)
-                        .foregroundStyle(Color.danger)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    photoCard
+                    detailsCard
+                    macrosCard
+                    ingredientsCard
+                    methodCard
+                    if let errorText {
+                        Text(errorText)
+                            .font(.subheadJ)
+                            .foregroundStyle(Color.danger)
+                    }
                 }
+                .padding(PageMargin.standard)
             }
-            .formStyle(.grouped)
+            .background(Color.bgCanvas)
             .navigationTitle(editing == nil ? "New meal prep" : "Edit meal prep")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -87,17 +90,17 @@ struct MealPrepEditorView: View {
             }
         }
         #if os(macOS)
-        .frame(minWidth: 520, minHeight: 640)
+        .frame(minWidth: 620, idealWidth: 660, minHeight: 640, idealHeight: 720)
         #endif
     }
 
-    // MARK: - Sections
+    // MARK: - Photo
 
-    private var photoSection: some View {
-        Section {
+    private var photoCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
             HStack(spacing: Space.lg) {
                 previewPhoto
-                    .frame(width: 88, height: 88)
+                    .frame(width: 92, height: 92)
                     .clipShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
 
                 VStack(alignment: .leading, spacing: Space.sm) {
@@ -105,25 +108,32 @@ struct MealPrepEditorView: View {
                         Text(hasAnyPhoto ? "Change photo" : "Add a photo")
                             .font(.subheadStrongJ)
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentPrimary)
+
                     if hasAnyPhoto {
-                        Button("Remove", role: .destructive) {
+                        Button("Remove") {
                             pickedPhoto = nil
                             pickerItem = nil
                             if let editing, editing.hasPhoto {
                                 Task { await store.removePhoto(id: editing.id) }
                             }
                         }
+                        .buttonStyle(.plain)
                         .font(.subheadJ)
+                        .foregroundStyle(Color.danger)
                     }
+
+                    Text("So you can see what the batch should look like next time.")
+                        .font(.captionJ)
+                        .foregroundStyle(Color.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, Space.xs)
-        } footer: {
-            Text("A photo of the finished batch, so you can see what it should look like next time.")
-                .font(.captionJ)
-                .foregroundStyle(Color.textTertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
     }
 
     private var hasAnyPhoto: Bool {
@@ -135,49 +145,84 @@ struct MealPrepEditorView: View {
         if let pickedPhoto, let image = PlatformImage.from(pickedPhoto) {
             image.resizable().scaledToFill()
         } else {
-            MealPhoto(url: editing?.photoUrl, height: 88, cornerRadius: Radius.control)
+            MealPhoto(url: editing?.photoUrl, height: 92, cornerRadius: Radius.control)
         }
     }
 
-    private var detailsSection: some View {
-        Section("The meal") {
-            TextField("Name", text: $name)
-            TextField("Short description (optional)", text: $description, axis: .vertical)
-                .lineLimit(1...3)
-            HStack {
-                Text("Prep time")
-                Spacer()
-                TextField("45", text: $prepMinutes)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 60)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                Text("min").foregroundStyle(Color.textSecondary)
+    // MARK: - Details
+
+    private var detailsCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("The meal")
+
+            boxed { PromptField(prompt: "Name", text: $name) }
+            boxed {
+                PromptField(
+                    prompt: "Short description (optional)",
+                    text: $summary,
+                    axis: .vertical,
+                    lineLimit: 1...3,
+                )
             }
-            Stepper("Portions: \(portions)", value: $portions, in: 1...50)
+
+            HStack(alignment: .bottom, spacing: Space.lg) {
+                CaptionedField(
+                    caption: "Prep time",
+                    prompt: "45",
+                    text: $prepMinutes,
+                    width: 66,
+                    suffix: "min",
+                )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Portions")
+                        .font(.microJ)
+                        .foregroundStyle(Color.textTertiary)
+                    Stepper(value: $portions, in: 1...50) {
+                        Text("\(portions)")
+                            .font(.numeralJ)
+                            .foregroundStyle(Color.textPrimary)
+                            .frame(minWidth: 22)
+                    }
+                    .fixedSize()
+                }
+                Spacer(minLength: 0)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
     }
 
-    private var macrosSection: some View {
-        Section {
-            Picker("These numbers are", selection: $basis) {
-                Text("For the whole batch").tag(MacrosBasis.total)
+    // MARK: - Macros
+
+    private var macrosCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Macros")
+
+            Picker("", selection: $basis) {
+                Text("Whole batch").tag(MacrosBasis.total)
                 Text("Per portion").tag(MacrosBasis.portion)
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
 
-            macroField("Calories", text: $calories, unit: "kcal")
-            macroField("Protein", text: $protein, unit: "g")
-            macroField("Carbs", text: $carbs, unit: "g")
-            macroField("Fat", text: $fat, unit: "g")
-        } header: {
-            Text("Macros")
-        } footer: {
+            VStack(spacing: Space.sm) {
+                LabeledField(label: "Calories", prompt: "0", text: $calories, unit: "kcal")
+                Divider().overlay(Color.borderHairline)
+                LabeledField(label: "Protein", prompt: "0", text: $protein, unit: "g")
+                Divider().overlay(Color.borderHairline)
+                LabeledField(label: "Carbs", prompt: "0", text: $carbs, unit: "g")
+                Divider().overlay(Color.borderHairline)
+                LabeledField(label: "Fat", prompt: "0", text: $fat, unit: "g")
+            }
+
             Text(macroFooter)
                 .font(.captionJ)
                 .foregroundStyle(Color.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
     }
 
     /// Shows the conversion live, so a mis-set basis is obvious before saving.
@@ -190,60 +235,81 @@ struct MealPrepEditorView: View {
         return "That is \(Int(perPortion.rounded())) kcal per portion, \(Int(total.rounded())) kcal for all \(portions)."
     }
 
-    private func macroField(_ title: String, text: Binding<String>, unit: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            TextField("0", text: text)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 70)
-                #if os(iOS)
-                .keyboardType(.decimalPad)
-                #endif
-            Text(unit)
-                .foregroundStyle(Color.textSecondary)
-                .frame(width: 34, alignment: .leading)
-        }
-    }
+    // MARK: - Ingredients
 
-    private var ingredientsSection: some View {
-        Section("Ingredients") {
+    private var ingredientsCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Ingredients")
+
             ForEach($ingredients) { $ingredient in
                 HStack(spacing: Space.sm) {
-                    TextField("Ingredient", text: $ingredient.name)
-                    TextField("Amount", text: $ingredient.quantity)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 82)
-                        .foregroundStyle(Color.textSecondary)
+                    boxed { PromptField(prompt: "Ingredient", text: $ingredient.name) }
+
+                    // Wide enough for "500 g" and "2 tbsp" without the hint
+                    // truncating, which is what "Amou / nt" was.
+                    boxed { PromptField(prompt: "Amount", text: $ingredient.quantity) }
+                        .frame(width: 110)
+
+                    Button {
+                        withJarvisAnimation {
+                            ingredients.removeAll { $0.id == ingredient.id }
+                            if ingredients.isEmpty { ingredients = [IngredientDraft()] }
+                        }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove ingredient")
                 }
-            }
-            .onDelete { offsets in
-                ingredients.remove(atOffsets: offsets)
-                if ingredients.isEmpty { ingredients = [IngredientDraft()] }
-            }
-            .onMove { source, destination in
-                ingredients.move(fromOffsets: source, toOffset: destination)
             }
 
             Button {
                 withJarvisAnimation { ingredients.append(IngredientDraft()) }
             } label: {
-                Label("Add ingredient", systemImage: "plus.circle")
+                Label("Add ingredient", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.jarvisSecondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
     }
 
-    private var instructionsSection: some View {
-        Section {
-            TextField("How do you make it?", text: $instructions, axis: .vertical)
-                .lineLimit(4...14)
-        } header: {
-            Text("Method")
-        } footer: {
-            Text("Write it however you think about it — one line or ten steps.")
+    // MARK: - Method
+
+    private var methodCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Method")
+            boxed {
+                PromptField(
+                    prompt: "How do you make it?",
+                    text: $instructions,
+                    axis: .vertical,
+                    lineLimit: 4...14,
+                )
+            }
+            Text("Write it however you think about it, one line or ten steps.")
                 .font(.captionJ)
                 .foregroundStyle(Color.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    /// Shared field chrome, so every input on the sheet is the same object.
+    private func boxed(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .padding(.horizontal, Space.md)
+            .padding(.vertical, Space.sm)
+            .frame(minHeight: 36)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color.bgSubtle,
+                in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
+            )
     }
 
     // MARK: - Load & save
@@ -252,7 +318,7 @@ struct MealPrepEditorView: View {
         guard !didLoad, let editing else { return }
         didLoad = true
         name = editing.name
-        description = editing.description ?? ""
+        summary = editing.description ?? ""
         instructions = editing.instructions ?? ""
         prepMinutes = editing.prepMinutes.map(String.init) ?? ""
         portions = editing.portions
@@ -286,7 +352,7 @@ struct MealPrepEditorView: View {
 
         let request = MealPrepRequest(
             name: trimmedName,
-            description: description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            description: summary.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             instructions: instructions.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             prepMinutes: Int(prepMinutes.trimmingCharacters(in: .whitespaces)),
             portions: portions,

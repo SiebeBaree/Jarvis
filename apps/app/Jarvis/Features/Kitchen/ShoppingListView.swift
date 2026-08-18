@@ -110,7 +110,8 @@ struct ShoppingListView: View {
                 .foregroundStyle(Color.accentPrimary)
                 .frame(width: 22)
 
-            TextField("Add an item", text: $draft)
+            TextField("", text: $draft, prompt: Text("Add an item"))
+                .labelsHidden()
                 .textFieldStyle(.plain)
                 .font(.bodyJ)
                 .foregroundStyle(Color.textPrimary)
@@ -320,17 +321,35 @@ private struct ShoppingItemEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Item", text: $name)
-                    TextField("Amount (optional)", text: $quantity)
-                } footer: {
-                    Text("The amount is free text — \"2 kg\", \"3x\", \"a big one\".")
-                        .font(.captionJ)
-                        .foregroundStyle(Color.textTertiary)
-                }
+            VStack(alignment: .leading, spacing: Space.lg) {
+                PromptField(prompt: "Item", text: $name)
+                    .padding(.horizontal, Space.md)
+                    .frame(height: 38)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color.bgSubtle,
+                        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
+                    )
+
+                PromptField(prompt: "Amount (optional)", text: $quantity)
+                    .padding(.horizontal, Space.md)
+                    .frame(height: 38)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color.bgSubtle,
+                        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
+                    )
+
+                Text("The amount is free text: \"2 kg\", \"3x\", \"a big one\".")
+                    .font(.captionJ)
+                    .foregroundStyle(Color.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
             }
-            .formStyle(.grouped)
+            .padding(PageMargin.standard)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.bgCanvas)
             .navigationTitle("Edit item")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -353,7 +372,7 @@ private struct ShoppingItemEditor: View {
             quantity = item.quantity ?? ""
         }
         #if os(macOS)
-        .frame(minWidth: 400, minHeight: 220)
+        .frame(minWidth: 460, minHeight: 300)
         #endif
     }
 }

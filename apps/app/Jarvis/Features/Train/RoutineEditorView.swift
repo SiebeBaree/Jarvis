@@ -5,6 +5,11 @@ import SwiftUI
 /// Write or edit a routine: "Leg day", "Chest & Back", whatever the user
 /// actually trains. Nothing here is generated or suggested — the whole feature
 /// is that this list is theirs.
+///
+/// Layout note: the exercise lines are a card with the numbers stacked under
+/// their captions, not a single inline row. Inline, "Sets × Reps to Reps @ kg"
+/// needs more width than a sheet has, so the captions wrapped mid-word and the
+/// fields collapsed. Stacked, every column keeps its own width at any size.
 struct RoutineEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -22,18 +27,17 @@ struct RoutineEditorView: View {
     @State private var showExercisePicker = false
     @State private var didLoad = false
 
-    /// One editable routine line. Reps are a range because that is how a
-    /// program is written ("3 × 8-12"), and the two fields collapse to one
-    /// number when they match.
+    /// One editable routine line. Numbers live as strings so a half-typed
+    /// field is not silently rewritten to 0 while the user is still typing.
     private struct Line: Identifiable, Equatable {
         var id: String { exerciseId }
         let exerciseId: String
         let name: String
         let isBodyweight: Bool
-        var sets: Int
-        var repsLow: Int?
-        var repsHigh: Int?
-        var weightKg: Double?
+        var sets: String
+        var repsLow: String
+        var repsHigh: String
+        var weight: String
     }
 
     private var canSave: Bool {
@@ -46,9 +50,10 @@ struct RoutineEditorView: View {
                 if isLoading {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    form
+                    content
                 }
             }
+            .background(Color.bgCanvas)
             .navigationTitle(routineId == nil ? "New routine" : "Edit routine")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -73,145 +78,145 @@ struct RoutineEditorView: View {
         }
         .task { await load() }
         #if os(macOS)
-        .frame(minWidth: 520, minHeight: 620)
+        .frame(minWidth: 620, idealWidth: 660, minHeight: 620, idealHeight: 700)
         #endif
     }
 
-    private var form: some View {
-        Form {
-            Section("Routine") {
-                HStack(spacing: Space.md) {
-                    TextField("💪", text: $emoji)
-                        .frame(width: 44)
-                        .multilineTextAlignment(.center)
-                    TextField("Leg day, Chest & Back, …", text: $name)
-                }
-                colorRow
-            }
-
-            Section {
-                if lines.isEmpty {
-                    Text("No exercises yet. Add the movements you do, in the order you do them.")
+    private var content: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                routineCard
+                exercisesSection
+                if let errorText {
+                    Text(errorText)
                         .font(.subheadJ)
-                        .foregroundStyle(Color.textTertiary)
-                } else {
-                    ForEach($lines) { $line in
-                        LineEditor(line: $line)
-                    }
-                    .onDelete { lines.remove(atOffsets: $0) }
-                    .onMove { lines.move(fromOffsets: $0, toOffset: $1) }
+                        .foregroundStyle(Color.danger)
                 }
-
-                Button {
-                    showExercisePicker = true
-                } label: {
-                    Label("Add exercise", systemImage: "plus.circle")
-                }
-            } header: {
-                Text("Exercises")
-            } footer: {
-                Text("Targets are a reminder, not a rule. During a workout you will also see what you actually lifted last time.")
-                    .font(.captionJ)
-                    .foregroundStyle(Color.textTertiary)
-            }
-
-            if let errorText {
-                Text(errorText)
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.danger)
-            }
-
-            if let routineId {
-                Section {
+                if let routineId {
                     Button("Delete routine", role: .destructive) {
                         Task {
                             await store.deleteRoutine(routineId)
                             dismiss()
                         }
                     }
+                    .buttonStyle(.jarvisSecondary)
+                    .frame(maxWidth: .infinity)
                 }
             }
+            .padding(PageMargin.standard)
         }
-        .formStyle(.grouped)
     }
 
-    private var colorRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+    // MARK: - Routine
+
+    private var routineCard: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Routine")
+
             HStack(spacing: Space.sm) {
-                ForEach(ItemColor.palette) { option in
-                    Circle()
-                        .fill(option.color)
-                        .frame(width: 26, height: 26)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.textPrimary, lineWidth: option.id == color.id ? 2 : 0)
-                                .padding(-3),
-                        )
-                        .pressable(haptic: .light) { color = option }
-                        .accessibilityLabel(option.displayName)
+                TextField("", text: $emoji, prompt: Text("💪"))
+                    .labelsHidden()
+                    .textFieldStyle(.plain)
+                    .multilineTextAlignment(.center)
+                    .font(.system(size: 18))
+                    .frame(width: 46, height: 36)
+                    .background(
+                        Color.bgSubtle,
+                        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
+                    )
+
+                PromptField(prompt: "Name, like Leg day or Chest & Back", text: $name)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Space.md)
+                    .frame(height: 36)
+                    .background(
+                        Color.bgSubtle,
+                        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous),
+                    )
+            }
+
+            ColorSwatchPicker(selection: $color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard()
+    }
+
+    // MARK: - Exercises
+
+    private var exercisesSection: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            SectionHeader("Exercises", subtitle: lines.isEmpty ? nil : "\(lines.count)") {
+                Button("Add") { showExercisePicker = true }
+                    .buttonStyle(.jarvisSoft)
+            }
+
+            if lines.isEmpty {
+                Text("No exercises yet. Add the movements you do, in the order you do them.")
+                    .font(.subheadJ)
+                    .foregroundStyle(Color.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, Space.md)
+            } else {
+                ForEach($lines) { $line in
+                    lineCard($line)
                 }
             }
-            .padding(.vertical, Space.xs)
+
+            Button {
+                showExercisePicker = true
+            } label: {
+                Label("Add exercise", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.jarvisSecondary)
+
+            Text("Targets are a reminder, not a rule. During a workout you also see what you actually lifted last time.")
+                .font(.captionJ)
+                .foregroundStyle(Color.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    // MARK: - Line editor
-
-    private struct LineEditor: View {
-        @Binding var line: Line
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: Space.sm) {
-                Text(line.name)
+    private func lineCard(_ line: Binding<Line>) -> some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            HStack(spacing: Space.sm) {
+                Text(line.wrappedValue.name)
                     .font(.headlineJ)
                     .foregroundStyle(Color.textPrimary)
-
-                HStack(spacing: Space.sm) {
-                    field("Sets", value: Binding(
-                        get: { String(line.sets) },
-                        set: { line.sets = max(1, Int($0) ?? 1) },
-                    ), width: 46)
-
-                    Text("×").foregroundStyle(Color.textTertiary)
-
-                    field("Reps", value: Binding(
-                        get: { line.repsLow.map(String.init) ?? "" },
-                        set: { line.repsLow = Int($0) },
-                    ), width: 46)
-
-                    Text("-").foregroundStyle(Color.textTertiary)
-
-                    field("to", value: Binding(
-                        get: { line.repsHigh.map(String.init) ?? "" },
-                        set: { line.repsHigh = Int($0) },
-                    ), width: 46)
-
-                    Spacer(minLength: 0)
-
-                    if !line.isBodyweight {
-                        field("kg", value: Binding(
-                            get: { line.weightKg.map(Format.weight) ?? "" },
-                            set: { line.weightKg = Double($0.replacingOccurrences(of: ",", with: ".")) },
-                        ), width: 56)
-                        Text("kg")
-                            .font(.microJ)
-                            .foregroundStyle(Color.textTertiary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Space.sm)
+                Button {
+                    withJarvisAnimation {
+                        lines.removeAll { $0.exerciseId == line.wrappedValue.exerciseId }
                     }
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(line.wrappedValue.name)")
+            }
+
+            HStack(alignment: .bottom, spacing: Space.sm) {
+                CaptionedField(caption: "Sets", prompt: "3", text: line.sets, width: 48)
+                CaptionedField(caption: "Reps", prompt: "8", text: line.repsLow, width: 48)
+                CaptionedField(caption: "to", prompt: "12", text: line.repsHigh, width: 48)
+                Spacer(minLength: 0)
+                if !line.wrappedValue.isBodyweight {
+                    CaptionedField(
+                        caption: "Weight",
+                        prompt: "0",
+                        text: line.weight,
+                        width: 66,
+                        suffix: "kg",
+                    )
                 }
             }
-            .padding(.vertical, Space.xs)
         }
-
-        private func field(_ placeholder: String, value: Binding<String>, width: CGFloat) -> some View {
-            TextField(placeholder, text: value)
-                .multilineTextAlignment(.center)
-                .frame(width: width)
-                .padding(.vertical, 5)
-                .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.chip, style: .continuous))
-                #if os(iOS)
-                .keyboardType(.decimalPad)
-                #endif
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jarvisCard(padding: Space.md)
     }
 
     // MARK: - Load & save
@@ -232,10 +237,10 @@ struct RoutineEditorView: View {
                 exerciseId: $0.exerciseId,
                 name: $0.name,
                 isBodyweight: $0.isBodyweight,
-                sets: $0.targetSets,
-                repsLow: $0.targetRepsLow,
-                repsHigh: $0.targetRepsHigh,
-                weightKg: $0.targetWeightKg,
+                sets: String($0.targetSets),
+                repsLow: $0.targetRepsLow.map(String.init) ?? "",
+                repsHigh: $0.targetRepsHigh.map(String.init) ?? "",
+                weight: $0.targetWeightKg.map(Format.weight) ?? "",
             )
         }
     }
@@ -248,10 +253,10 @@ struct RoutineEditorView: View {
                     exerciseId: exercise.id,
                     name: exercise.name,
                     isBodyweight: exercise.isBodyweight,
-                    sets: 3,
-                    repsLow: exercise.isBodyweight ? nil : 8,
-                    repsHigh: exercise.isBodyweight ? nil : 12,
-                    weightKg: nil,
+                    sets: "3",
+                    repsLow: exercise.isBodyweight ? "" : "8",
+                    repsHigh: exercise.isBodyweight ? "" : "12",
+                    weight: "",
                 ),
             )
         }
@@ -264,14 +269,18 @@ struct RoutineEditorView: View {
         errorText = nil
 
         let inputs = lines.map { line in
-            RoutineExerciseInput(
+            let low = Int(line.repsLow.trimmingCharacters(in: .whitespaces))
+            return RoutineExerciseInput(
                 exerciseId: line.exerciseId,
-                targetSets: line.sets,
-                targetRepsLow: line.repsLow,
+                targetSets: max(1, Int(line.sets.trimmingCharacters(in: .whitespaces)) ?? 3),
+                targetRepsLow: low,
                 // An empty "to" field means a fixed rep count, not an open
                 // range, so it mirrors the low end rather than going nil.
-                targetRepsHigh: line.repsHigh ?? line.repsLow,
-                targetWeightKg: line.weightKg,
+                targetRepsHigh: Int(line.repsHigh.trimmingCharacters(in: .whitespaces)) ?? low,
+                targetWeightKg: Double(
+                    line.weight.trimmingCharacters(in: .whitespaces)
+                        .replacingOccurrences(of: ",", with: "."),
+                ),
             )
         }
 
