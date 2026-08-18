@@ -282,7 +282,9 @@ private struct ExerciseCard: View {
     private func targetLine(_ target: SessionTargetDTO) -> String {
         var text = "\(exercise.workingSets.count)/\(target.sets) sets"
         if let reps = target.repsLabel { text += " × \(reps)" }
-        if let weight = target.weightKg, weight > 0 { text += " @ \(Format.weight(weight)) kg" }
+        if let weight = target.weightKg, weight > 0 {
+            text += " @ \(Format.load(weight, isBodyweight: exercise.isBodyweight))"
+        }
         return text
     }
 
@@ -296,7 +298,7 @@ private struct ExerciseCard: View {
                     .foregroundStyle(Color.textTertiary)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(Format.sets(previous.workingSets))
+                    Text(Format.sets(previous.workingSets, isBodyweight: exercise.isBodyweight))
                         .font(.monoJ)
                         .foregroundStyle(Color.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -329,7 +331,7 @@ private struct ExerciseCard: View {
                             in: RoundedRectangle(cornerRadius: 6, style: .continuous),
                         )
 
-                    Text(Format.set(set))
+                    Text(Format.set(set, isBodyweight: exercise.isBodyweight))
                         .font(.headlineJ)
                         .foregroundStyle(set.isWarmup ? Color.textSecondary : Color.textPrimary)
 
@@ -386,15 +388,15 @@ private struct ExerciseCard: View {
     private var logControl: some View {
         VStack(spacing: Space.sm) {
             HStack(spacing: Space.sm) {
-                if !exercise.isBodyweight {
-                    NumberStepper(
-                        value: $weight,
-                        step: 2.5,
-                        range: 0...600,
-                        unit: "kg",
-                        format: Format.weight,
-                    )
-                }
+                // Always present. A bodyweight movement still takes a dip belt,
+                // and 0 simply means you carried nothing extra.
+                NumberStepper(
+                    value: $weight,
+                    step: 2.5,
+                    range: 0...600,
+                    unit: exercise.isBodyweight ? "+kg" : "kg",
+                    format: Format.weight,
+                )
                 NumberStepper(
                     value: Binding(
                         get: { Double(reps) },
@@ -421,13 +423,13 @@ private struct ExerciseCard: View {
                 Spacer(minLength: 0)
 
                 Button {
-                    onLog(exercise.isBodyweight ? nil : weight, reps, isWarmup)
+                    onLog(weight > 0 ? weight : nil, reps, isWarmup)
                     Haptics.play(.success)
                 } label: {
                     Text("Log set").frame(minWidth: 92)
                 }
                 .buttonStyle(.jarvisPrimary)
-                .disabled(reps == 0 && (exercise.isBodyweight || weight == 0))
+                .disabled(reps == 0 && weight == 0)
             }
         }
     }

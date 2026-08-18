@@ -204,15 +204,13 @@ struct RoutineEditorView: View {
                 CaptionedField(caption: "Reps", prompt: "8", text: line.repsLow, width: 48)
                 CaptionedField(caption: "to", prompt: "12", text: line.repsHigh, width: 48)
                 Spacer(minLength: 0)
-                if !line.wrappedValue.isBodyweight {
-                    CaptionedField(
-                        caption: "Weight",
-                        prompt: "0",
-                        text: line.weight,
-                        width: 66,
-                        suffix: "kg",
-                    )
-                }
+                CaptionedField(
+                    caption: line.wrappedValue.isBodyweight ? "Added" : "Weight",
+                    prompt: "0",
+                    text: line.weight,
+                    width: 66,
+                    suffix: "kg",
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,8 +252,8 @@ struct RoutineEditorView: View {
                     name: exercise.name,
                     isBodyweight: exercise.isBodyweight,
                     sets: "3",
-                    repsLow: exercise.isBodyweight ? "" : "8",
-                    repsHigh: exercise.isBodyweight ? "" : "12",
+                    repsLow: "8",
+                    repsHigh: "12",
                     weight: "",
                 ),
             )

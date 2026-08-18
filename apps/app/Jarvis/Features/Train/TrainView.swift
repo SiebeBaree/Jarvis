@@ -410,15 +410,24 @@ enum Format {
             : String(format: "%.1f", value)
     }
 
-    /// "80 × 8", or "12 reps" for bodyweight work that carries no load.
-    static func set(_ set: WorkoutSetDTO) -> String {
+    /// "80 × 8" for a loaded lift, "+35 × 8" when the load is strapped to you
+    /// on a bodyweight movement, and "12 reps" when there is no load at all.
+    ///
+    /// The plus sign matters: 35 on a weighted pull-up is 35 kg *added*, not
+    /// 35 kg total, and the two would otherwise look identical in a history.
+    static func set(_ set: WorkoutSetDTO, isBodyweight: Bool = false) -> String {
         let reps = set.reps.map(String.init) ?? "-"
         guard let load = set.weightKg, load > 0 else { return "\(reps) reps" }
-        return "\(weight(load)) × \(reps)"
+        return "\(isBodyweight ? "+" : "")\(weight(load)) × \(reps)"
     }
 
     /// "80 × 8, 80 × 7" — a whole session's work on one movement.
-    static func sets(_ sets: [WorkoutSetDTO]) -> String {
-        sets.map(set).joined(separator: ", ")
+    static func sets(_ sets: [WorkoutSetDTO], isBodyweight: Bool = false) -> String {
+        sets.map { set($0, isBodyweight: isBodyweight) }.joined(separator: ", ")
+    }
+
+    /// How a target or logged load is written for this movement.
+    static func load(_ value: Double, isBodyweight: Bool) -> String {
+        "\(isBodyweight ? "+" : "")\(weight(value)) kg"
     }
 }

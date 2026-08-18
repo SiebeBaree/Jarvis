@@ -16,20 +16,20 @@ struct ExerciseProgressView: View {
     let name: String
     let store: WorkoutsStore
 
-    @State private var state: LoadState<[ExerciseHistoryPointDTO]> = .idle
+    @State private var state: LoadState<ExerciseHistoryResponse> = .idle
 
     var body: some View {
         Group {
             switch state {
-            case .loaded(let points) where points.isEmpty:
+            case .loaded(let response) where response.points.isEmpty:
                 EmptyState(
                     symbol: "chart.line.uptrend.xyaxis",
                     title: "No history yet",
                     message: "Log a few sets of \(name) and the trend shows up here.",
                     tint: ItemColor.rose.color,
                 )
-            case .loaded(let points):
-                content(points)
+            case .loaded(let response):
+                content(response)
             case .failed(let message):
                 VStack(spacing: Space.lg) {
                     Text(message)
@@ -57,7 +57,7 @@ struct ExerciseProgressView: View {
         if state.value == nil { state = .loading }
         do {
             let response = try await api.exerciseHistory(id: exerciseId, limit: 40)
-            state = .loaded(response.points)
+            state = .loaded(response)
         } catch {
             model.handle(error)
             state = .failed(TodayStore.message(for: error))
@@ -65,12 +65,13 @@ struct ExerciseProgressView: View {
     }
 
     @ViewBuilder
-    private func content(_ points: [ExerciseHistoryPointDTO]) -> some View {
-        ScrollView {
+    private func content(_ response: ExerciseHistoryResponse) -> some View {
+        let points = response.points
+        return ScrollView {
             VStack(alignment: .leading, spacing: Space.lg) {
-                summary(points)
+                summary(points, isBodyweight: response.exercise.isBodyweight)
                 chart(points)
-                history(points)
+                history(points, isBodyweight: response.exercise.isBodyweight)
             }
             .padding(.horizontal, PageMargin.standard)
             .padding(.vertical, Space.md)
@@ -83,13 +84,16 @@ struct ExerciseProgressView: View {
 
     // MARK: - Summary
 
-    private func summary(_ points: [ExerciseHistoryPointDTO]) -> some View {
+    private func summary(_ points: [ExerciseHistoryPointDTO], isBodyweight: Bool) -> some View {
         let best = points.compactMap(\.estimatedOneRepMax).max()
         let heaviest = points.compactMap(\.topWeightKg).max()
         let change = trend(points)
 
         return HStack(spacing: Space.lg) {
-            stat(heaviest.map { "\(Format.weight($0)) kg" } ?? Placeholder.noValue, "heaviest set")
+            stat(
+                heaviest.map { Format.load($0, isBodyweight: isBodyweight) } ?? Placeholder.noValue,
+                isBodyweight ? "heaviest added" : "heaviest set",
+            )
             stat(best.map { "\(Format.weight($0)) kg" } ?? Placeholder.noValue, "best est. 1RM")
             if let change {
                 stat(change.text, "last 30 days", tint: change.tint)
@@ -186,7 +190,7 @@ struct ExerciseProgressView: View {
 
     // MARK: - History
 
-    private func history(_ points: [ExerciseHistoryPointDTO]) -> some View {
+    private func history(_ points: [ExerciseHistoryPointDTO], isBodyweight: Bool) -> some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             SectionHeader("Every session", subtitle: "\(points.count)")
 
@@ -198,7 +202,7 @@ struct ExerciseProgressView: View {
                             .foregroundStyle(Color.textTertiary)
                             .frame(width: 52, alignment: .leading)
 
-                        Text(topSetLabel(point))
+                        Text(topSetLabel(point, isBodyweight: isBodyweight))
                             .font(.headlineJ)
                             .foregroundStyle(Color.textPrimary)
 
@@ -220,9 +224,9 @@ struct ExerciseProgressView: View {
         .jarvisCard()
     }
 
-    private func topSetLabel(_ point: ExerciseHistoryPointDTO) -> String {
+    private func topSetLabel(_ point: ExerciseHistoryPointDTO, isBodyweight: Bool) -> String {
         guard let reps = point.topReps else { return Placeholder.noValue }
         guard let weight = point.topWeightKg, weight > 0 else { return "\(reps) reps" }
-        return "\(Format.weight(weight)) × \(reps)"
+        return "\(isBodyweight ? "+" : "")\(Format.weight(weight)) × \(reps)"
     }
 }

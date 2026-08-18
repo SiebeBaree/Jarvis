@@ -394,6 +394,7 @@ door, which is the single most useful thing either feature does.
 | "Last time" is a query, not a stored column | `previousPerformance` ranks prior sets by session recency in one CTE, so the number can never drift from the sets it came from |
 | Sessions survive their routine (`ON DELETE SET NULL`) | A workout you did is a fact about your history; tidying a template must not erase it |
 | Warm-ups are logged but excluded from volume, bests and progression | Counting them would flatter every total |
+| A weight field is present on every exercise, bodyweight included | Weighted pull-ups and weighted dips are ordinary training. Hiding the field on anything flagged bodyweight made 35 kg on a dip belt impossible to record. On those movements the number means *added* load and is written "+35 × 8", so it can never be read as a total |
 | Progression charts estimated 1RM (Epley), not raw weight | A weight-only line says you got weaker the week you did 3×12 instead of 5×5. The set behind each point is listed underneath, so the estimate is never taken on trust |
 | Set logging goes through the offline outbox | A gym is the worst network the app will ever see. Sets carry a client-generated id, and the session detail has its own cache entry so an in-progress workout survives a relaunch with no signal |
 | Duplicate exercise names resolve to the existing exercise (200, not 409) | A second "Bench press" row would split its own history in half |
