@@ -113,11 +113,12 @@ elapsedDayOfWeek = Mon=1..Sun=7
 daily:        min(1, reps/1)
 multi_daily:  min(1, reps/targetReps)            # 1 of 2 = 0.5
 weekly_frequency:
-  live (current week):  expected = targetReps × elapsedDayOfWeek/7
-                        credit = min(1, doneThroughDay / expected)     # pace-based
+  live (current week):  daysLeft = 7 − elapsedDayOfWeek                  # days after the scored day
+                        credit = min(1, (doneThroughDay + daysLeft) / targetReps)
+                        expected = max(0, targetReps − daysLeft)         # breakdown only
   reconciled (week over): credit = min(1, weekReps/targetReps) applied UNIFORMLY to all 7 days
 ```
-Two phases because pure pace would permanently punish back-loading (skip Mon, do 5 sessions Tue–Sat must score perfectly). Live = motivational feedback; at week end every day reconciles to the weekly-total credit and only then finalizes. `plannedDays` never enters scoring. Habit component = mean over active habits (equal weights v1).
+Two phases because pure pace would permanently punish back-loading (skip Mon, do 5 sessions Tue–Sat must score perfectly). The live value is the **best credit that day can still finalize at**, counting every remaining day of the week as a rep still available: skipping Monday when six days remain costs nothing, and credit only drops once the shortfall is real (Wednesday at 0 of 5 can reach at most 4, so 0.8). By Sunday the live value already equals the reconciled one, so finalizing a played-out week moves nothing. Live = motivational feedback, and it never accuses you of being behind on a target you can still hit. `plannedDays` never enters scoring. Habit component = mean over active habits (equal weights v1).
 
 **Feel**: mood value/100; missing → NOT_APPLICABLE.
 

@@ -82,28 +82,76 @@ describe("habitCredit", () => {
     expect(habitCredit({ type: "multi_daily", targetReps: 3, repsToday: 2, isLive: true }).credit).toBeCloseTo(2 / 3);
   });
 
-  it("weekly live: pace-based, capped at 1", () => {
-    // Gym 5x/week, Wednesday (elapsed 3): expected = 5*3/7 ≈ 2.14
-    const behind = habitCredit({
+  it("weekly live: an unspent day costs nothing while the target is still reachable", () => {
+    // Gym 5x/week, Monday, nothing done. Six days left is five sessions and
+    // one to spare, so the week can still finish perfect and Monday scores 1.
+    const monday = habitCredit({
       type: "weekly_frequency",
       targetReps: 5,
       repsToday: 0,
-      doneThroughDay: 2,
-      elapsedDayOfWeek: 3,
+      doneThroughDay: 0,
+      elapsedDayOfWeek: 1,
       isLive: true,
     });
-    expect(behind.credit).toBeCloseTo(2 / (15 / 7));
-    expect(behind.credit).toBeLessThan(1);
+    expect(monday.credit).toBe(1);
+    expect(monday.expected).toBe(0);
 
-    const ahead = habitCredit({
+    // Clean the apartment 1x/week, done on Sunday: every earlier day of that
+    // week sits at 1 the whole time, not at 0.
+    const chore = habitCredit({
+      type: "weekly_frequency",
+      targetReps: 1,
+      repsToday: 0,
+      doneThroughDay: 0,
+      elapsedDayOfWeek: 2,
+      isLive: true,
+    });
+    expect(chore.credit).toBe(1);
+
+    // Wednesday with 0 of 5 done: only Thu–Sun remain, so 4 is the best this
+    // week can reach and the day carries that ceiling, not a pace penalty.
+    const shortfall = habitCredit({
       type: "weekly_frequency",
       targetReps: 5,
       repsToday: 0,
-      doneThroughDay: 3,
+      doneThroughDay: 0,
       elapsedDayOfWeek: 3,
       isLive: true,
     });
-    expect(ahead.credit).toBe(1);
+    expect(shortfall.credit).toBeCloseTo(0.8);
+    expect(shortfall.expected).toBe(1); // one session by tonight keeps 5 alive
+
+    // Same Wednesday, one session banked: 1 + 4 remaining days = 5, still perfect.
+    const onTrack = habitCredit({
+      type: "weekly_frequency",
+      targetReps: 5,
+      repsToday: 0,
+      doneThroughDay: 1,
+      elapsedDayOfWeek: 3,
+      isLive: true,
+    });
+    expect(onTrack.credit).toBe(1);
+  });
+
+  it("weekly live: Sunday already equals the reconciled value", () => {
+    for (const done of [0, 2, 5, 6]) {
+      const live = habitCredit({
+        type: "weekly_frequency",
+        targetReps: 5,
+        repsToday: 0,
+        doneThroughDay: done,
+        elapsedDayOfWeek: 7,
+        isLive: true,
+      });
+      const final = habitCredit({
+        type: "weekly_frequency",
+        targetReps: 5,
+        repsToday: 0,
+        weekTotal: done,
+        isLive: false,
+      });
+      expect(live.credit).toBeCloseTo(final.credit);
+    }
   });
 
   it("weekly reconciled: uniform weekly-total credit — back-loading scores identically", () => {

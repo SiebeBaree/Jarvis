@@ -66,7 +66,7 @@ export interface HabitCreditInput {
   /** weekly_frequency only: Mon=1 .. Sun=7 of the scored day. */
   elapsedDayOfWeek?: number;
   /**
-   * true while the scored day's week is still running (live pace credit);
+   * true while the scored day's week is still running (live best-case credit);
    * false once the week has fully ended (uniform weekly-total reconciliation).
    */
   isLive: boolean;
@@ -74,7 +74,12 @@ export interface HabitCreditInput {
 
 export interface HabitCreditResult {
   credit: number; // 0..1
-  expected: number; // reps expected by this point (for the breakdown)
+  /**
+   * Reps needed by the end of the scored day (for the breakdown). For a live
+   * weekly habit this is the minimum that keeps a perfect week reachable, so
+   * it is 0 early in the week and rises to the full target by Sunday.
+   */
+  expected: number;
   reconciled: boolean;
 }
 
@@ -91,10 +96,19 @@ export function habitCredit(input: HabitCreditInput): HabitCreditResult {
       };
     case "weekly_frequency": {
       if (input.isLive) {
-        const elapsed = input.elapsedDayOfWeek ?? 7;
-        const expected = (target * elapsed) / 7; // target >= 1 ⇒ expected > 0
+        // Live credit is the best value this day can still finalize at, not a
+        // pace verdict: every day left in the week counts as a rep you can
+        // still land. Missing Monday with six days to go costs nothing,
+        // because reconciliation can still bring that Monday to a full 1.
+        // Credit drops only once the shortfall is real (Thursday with 0 of 5
+        // done can reach at most 4), and on Sunday it already equals the
+        // reconciled value, so finalizing a played-out week moves nothing.
+        const daysLeft = Math.max(0, 7 - (input.elapsedDayOfWeek ?? 7));
         const done = input.doneThroughDay ?? 0;
-        return { credit: Math.min(1, done / expected), expected, reconciled: false };
+        // Reps that must be in the bag by tonight to keep a perfect week
+        // reachable. Credit is 1 exactly when done >= expected.
+        const expected = Math.max(0, target - daysLeft);
+        return { credit: Math.min(1, (done + daysLeft) / target), expected, reconciled: false };
       }
       // Week over: every day of the week reconciles to the uniform weekly-total
       // credit, so back-loading (5 gym sessions Tue–Sat) scores identically to

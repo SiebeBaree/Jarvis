@@ -467,3 +467,32 @@ someone who already opened the app, and this reaches the phone that did not.
 - Delivery itself is unverified end to end: the message, the cron, the
   registration flow and the tap routing were all exercised against the real
   database and a simulator, but an actual APNs send needs the `.p8` key.
+
+## Weekly habits stop docking the live score (2026-08-18)
+
+`docs/spec.md:115` scored a live weekly habit on pace: `credit = min(1,
+doneThroughDay / (target × elapsedDayOfWeek/7))`. On Monday that expects
+`5/7` of a gym session, so any target of 7 or less collapses to all-or-nothing
+on day one: not going Monday zeroed the habit and pulled a 100 day down to an
+80, even though the week was untouched and six days remained. "Clean the
+apartment 1×/week" done every Sunday scored 0 on six days out of seven. The
+week-end reconciliation always repaired it, but the number shown for the day
+was a penalty for something not yet missed, which is the opposite of principle
+5: weekly habits judge the week, not the day.
+
+| Decision | Rationale |
+|---|---|
+| Live credit is now `min(1, (doneThroughDay + daysLeft) / target)`, `daysLeft = 7 − elapsedDayOfWeek` | The live score becomes the best value the day can still finalize at instead of a pace verdict. A day only costs points once the loss is real, and it costs exactly what the loss is worth: Wednesday at 0 of 5 can still reach 4, so it carries 0.8 |
+| The reconciled branch is untouched | Finished weeks were already right. The two branches now meet at Sunday (`daysLeft = 0` makes the live formula identical to the reconciled one), so finalization no longer moves a fully played week |
+| `expected` in the breakdown now means "reps needed by tonight to keep a perfect week reachable" (`max(0, target − daysLeft)`) | The old field held the fractional pace target, which no longer exists. The new one is the number that actually decides the credit: it is 0 early in the week and reaches the full target on Sunday |
+| The pace capsule's display rule (§B5.2) is unchanged | It was already the forgiving one; the score was the outlier. They now move in the same direction, though they still disagree in detail: the capsule counts today only from 18:00, the score counts whole days |
+
+### Not done
+
+- The provisional/final distinction is still invisible in the app. `isFinal`
+  arrives in the payload and no view reads it. It matters much less now that a
+  live day is no longer scored below what it can finalize at, but a day inside
+  the current week can still move down at week end.
+- A past day inside the live week shows a pace chip computed from the current
+  hour, so the same historical row can flip from "on pace" to "1 behind" at
+  18:00 today. Display only, no effect on the score.
