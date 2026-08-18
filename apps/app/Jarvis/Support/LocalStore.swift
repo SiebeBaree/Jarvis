@@ -13,11 +13,17 @@ enum Entity: String, Codable, Sendable {
     case score
     case metric
     case improvement
+    case exercise
+    case routine
+    case workout
+    case shopping
+    case meal
 
     /// For the "something changed, I don't know what" callers that predate
     /// entity tracking — behaves like the old blanket invalidation.
     static let all: Set<Entity> = [
         .task, .habit, .mood, .goal, .category, .area, .score, .metric, .improvement,
+        .exercise, .routine, .workout, .shopping, .meal,
     ]
 }
 
@@ -36,6 +42,14 @@ enum CacheKey: Hashable, Sendable {
     case trendScores(range: String)
     case trendWeekly
     case trendHeatmap
+    case exercises
+    case routines
+    case workoutSessions
+    /// Per-session, so an in-progress workout survives a relaunch in a gym
+    /// basement with no signal.
+    case workoutSession(id: String)
+    case shoppingList
+    case mealPreps
 
     /// Stable, filename-safe identity for the on-disk copy.
     var filename: String {
@@ -51,6 +65,12 @@ enum CacheKey: Hashable, Sendable {
         case .trendScores(let range): "trend-scores-\(range)"
         case .trendWeekly: "trend-weekly"
         case .trendHeatmap: "trend-heatmap"
+        case .exercises: "exercises"
+        case .routines: "routines"
+        case .workoutSessions: "workout-sessions"
+        case .workoutSession(let id): "workout-session-\(id)"
+        case .shoppingList: "shopping-list"
+        case .mealPreps: "meal-preps"
         }
     }
 
@@ -66,6 +86,14 @@ enum CacheKey: Hashable, Sendable {
         case .metrics: [.metric]
         case .improvementAreas: [.improvement]
         case .trendScores, .trendWeekly, .trendHeatmap: [.score, .habit, .mood, .task]
+        case .exercises: [.exercise]
+        // A routine card shows its exercise count, so renaming or deleting an
+        // exercise has to invalidate the routine list too.
+        case .routines: [.routine, .exercise, .workout]
+        case .workoutSessions: [.workout]
+        case .workoutSession: [.workout]
+        case .shoppingList: [.shopping]
+        case .mealPreps: [.meal]
         }
     }
 }

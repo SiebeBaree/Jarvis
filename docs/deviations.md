@@ -361,3 +361,67 @@ action instead of being re-presented per screen.
   updated. A content-level redesign of those four is the next pass.
 - `RepPips` survives in `HabitDetailView`'s today card; `CountRing` supersedes
   it everywhere else.
+
+---
+
+## Health tab: workouts, meal preps, shopping list (2026-08-18)
+
+Three features the spec never covered, added because the app was still leaving
+them to other apps (a gym tracker, Apple Notes, nothing at all). All three are
+manual: the user writes the routine, the recipe and the list. No AI touches
+any of it, by explicit request.
+
+### Navigation (extends §B1)
+
+A fifth section, **Health**, holding three segments: **Train · Meals · Shop**.
+
+Five is the ceiling. A sixth iPhone tab would collapse the tab bar into a
+"More" menu, so anything further has to become a segment of an existing tab.
+The hub is built exactly like `ProgressHubView` — picker in the window toolbar
+on macOS, top safe-area inset on iOS — so there is one way segments work in
+this app rather than two.
+
+Grouping the three together is a practical claim rather than a taxonomic one:
+you train, you cook for it, and you buy what the cooking needs. The payoff is
+that a meal prep can push its ingredients straight onto the shopping list next
+door, which is the single most useful thing either feature does.
+
+### Workouts
+
+| Decision | Rationale |
+|---|---|
+| Kilograms, no unit setting | The user lifts in kg. A unit column nobody would ever change only creates conversion bugs |
+| "Last time" is a query, not a stored column | `previousPerformance` ranks prior sets by session recency in one CTE, so the number can never drift from the sets it came from |
+| Sessions survive their routine (`ON DELETE SET NULL`) | A workout you did is a fact about your history; tidying a template must not erase it |
+| Warm-ups are logged but excluded from volume, bests and progression | Counting them would flatter every total |
+| Progression charts estimated 1RM (Epley), not raw weight | A weight-only line says you got weaker the week you did 3×12 instead of 5×5. The set behind each point is listed underneath, so the estimate is never taken on trust |
+| Set logging goes through the offline outbox | A gym is the worst network the app will ever see. Sets carry a client-generated id, and the session detail has its own cache entry so an in-progress workout survives a relaunch with no signal |
+| Duplicate exercise names resolve to the existing exercise (200, not 409) | A second "Bench press" row would split its own history in half |
+
+### Meal preps
+
+| Decision | Rationale |
+|---|---|
+| Macros store a `basis` (`portion` \| `total`) and the server returns both views | People read totals off a recipe or a packet. Quietly treating a batch total as one portion is an error you only notice weeks later, so the app asks, stores what was typed, and derives the other |
+| One photo per meal, replacing on re-upload | Same private Vercel Blob contract as progress photos; the store does not fill with every attempt at photographing the same tray of rice |
+| Writes are awaited, not queued | A meal prep is written once at a keyboard and can carry a photo, which the outbox cannot replay |
+
+### Shopping list
+
+| Decision | Rationale |
+|---|---|
+| One standing list, not many | The feature exists because things get forgotten between "I should buy that" and standing in the shop |
+| Single add field with a conservative quantity parser | "2 kg chicken" splits into amount + item; it only splits when the line starts with a number, and only absorbs a following word when it is a recognised unit. One field is the whole reason this beats Notes |
+| The entire row is the tick target | One thumb, trolley in the other hand |
+| Clearing is `POST /shopping-items/clear` with a body, not `DELETE ?scope=` | The offline outbox stores a mutation as (method, path, JSON) and percent-encodes the path, so a query string would not survive the trip |
+| Every write is optimistic and queued | Shop basements have no signal; nothing on this screen waits for the network |
+
+### Not done
+
+- Workout rest timers and supersets. Both are real gaps for a serious program;
+  neither was asked for, and both add a lot of state to the logging screen.
+- Reordering the shopping list by hand (it stays in the order things were
+  added), and aisle grouping.
+- Surfacing the shopping list on Today when it has unchecked items. Probably
+  the best remaining answer to "I always forget", but it changes a screen that
+  already works, so it is a deliberate follow-up rather than part of this pass.

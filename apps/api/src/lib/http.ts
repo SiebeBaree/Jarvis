@@ -63,3 +63,22 @@ export function parseQuery<T>(request: Request, schema: ZodType<T>): T {
   }
   return result.data;
 }
+
+/**
+ * Completes the client-chosen-id create pattern: the insert ran with
+ * `onConflictDoNothing()` and returned nothing, meaning that id already
+ * exists. Hand back the existing row (a replayed create is a no-op) unless it
+ * belongs to somebody else.
+ */
+export async function resolveIdempotentCreate<T extends { userId: string }>(
+  userId: string,
+  entity: string,
+  fetchExisting: () => Promise<T | undefined>,
+): Promise<T> {
+  const existing = await fetchExisting();
+  if (!existing) throw new ApiError(500, "internal_error", `Could not create ${entity}`);
+  if (existing.userId !== userId) {
+    throw new ApiError(409, "id_conflict", `That ${entity} id is already taken`);
+  }
+  return existing;
+}

@@ -346,3 +346,210 @@ export const photoUploadQuerySchema = z.object({
   angle: z.string().min(1).max(30),
   dayKey: dayKeySchema,
 });
+
+// ---------- workouts ----------
+//
+// Everything creatable carries an optional client-chosen `id` so the app's
+// offline outbox can replay a create without producing a duplicate — the same
+// contract tasks, habits and goals already use. That matters most here: sets
+// are logged mid-workout, which is exactly where the phone has no signal.
+
+const weightSchema = z.number().min(0).max(1000);
+const repsSchema = z.number().int().min(0).max(1000);
+
+export const exerciseCreateSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).max(80),
+  muscleGroup: z.string().max(40).nullish(),
+  equipment: z.string().max(40).nullish(),
+  isBodyweight: z.boolean().optional(),
+  notes: z.string().max(2000).nullish(),
+});
+
+export const exercisePatchSchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    muscleGroup: z.string().max(40).nullable().optional(),
+    equipment: z.string().max(40).nullable().optional(),
+    isBodyweight: z.boolean().optional(),
+    notes: z.string().max(2000).nullable().optional(),
+    archived: z.boolean().optional(),
+  })
+  .strict();
+
+export const exercisesQuerySchema = z.object({
+  includeArchived: z.enum(["true", "false"]).optional(),
+});
+
+/** One line of a routine: which exercise, and what to hit. */
+export const routineExerciseSchema = z
+  .object({
+    exerciseId: z.string().uuid(),
+    targetSets: z.number().int().min(1).max(20).optional(),
+    targetRepsLow: repsSchema.nullish(),
+    targetRepsHigh: repsSchema.nullish(),
+    targetWeightKg: weightSchema.nullish(),
+    restSeconds: z.number().int().min(0).max(3600).nullish(),
+    notes: z.string().max(500).nullish(),
+  })
+  .superRefine((line, ctx) => {
+    const low = line.targetRepsLow;
+    const high = line.targetRepsHigh;
+    if (low != null && high != null && low > high) {
+      ctx.addIssue({ code: "custom", message: "targetRepsLow must be <= targetRepsHigh" });
+    }
+  });
+
+export const routineCreateSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).max(80),
+  emoji: z.string().max(16).nullish(),
+  colorHex: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6,8}$/)
+    .nullish(),
+  notes: z.string().max(2000).nullish(),
+  sortOrder: z.number().int().optional(),
+  // The whole exercise list, always. A routine is short and is edited as one
+  // screen, so replacing it wholesale beats per-line PATCH bookkeeping.
+  exercises: z.array(routineExerciseSchema).max(40).optional(),
+});
+
+export const routinePatchSchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    emoji: z.string().max(16).nullable().optional(),
+    colorHex: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6,8}$/)
+      .nullable()
+      .optional(),
+    notes: z.string().max(2000).nullable().optional(),
+    sortOrder: z.number().int().optional(),
+    archived: z.boolean().optional(),
+    exercises: z.array(routineExerciseSchema).max(40).optional(),
+  })
+  .strict();
+
+export const sessionCreateSchema = z.object({
+  id: z.string().uuid().optional(),
+  routineId: z.string().uuid().nullish(),
+  title: z.string().min(1).max(120).optional(), // defaults to the routine name
+  dayKey: dayKeySchema.optional(),
+});
+
+export const sessionPatchSchema = z
+  .object({
+    title: z.string().min(1).max(120).optional(),
+    notes: z.string().max(4000).nullable().optional(),
+    dayKey: dayKeySchema.optional(),
+    finished: z.boolean().optional(),
+  })
+  .strict();
+
+export const sessionListQuerySchema = z.object({
+  from: dayKeySchema.optional(),
+  to: dayKeySchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+/** Logging a set. Replay-safe: the id is the identity, so a resend updates. */
+export const setUpsertSchema = z.object({
+  id: z.string().uuid().optional(),
+  exerciseId: z.string().uuid(),
+  setIndex: z.number().int().min(1).max(50).optional(), // defaults to next
+  weightKg: weightSchema.nullish(),
+  reps: repsSchema.nullish(),
+  isWarmup: z.boolean().optional(),
+});
+
+export const setPatchSchema = z
+  .object({
+    weightKg: weightSchema.nullable().optional(),
+    reps: repsSchema.nullable().optional(),
+    isWarmup: z.boolean().optional(),
+    setIndex: z.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+
+export const exerciseHistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+// ---------- shopping list ----------
+export const shoppingItemCreateSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).max(120),
+  quantity: z.string().max(40).nullish(),
+  sortOrder: z.number().int().optional(),
+});
+
+export const shoppingItemPatchSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    quantity: z.string().max(40).nullable().optional(),
+    checked: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .strict();
+
+/** Bulk add — "put this meal prep's ingredients on the list". */
+export const shoppingBulkAddSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        name: z.string().min(1).max(120),
+        quantity: z.string().max(40).nullish(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
+export const shoppingClearSchema = z.object({
+  scope: z.enum(["checked", "all"]).default("checked"),
+});
+
+// ---------- meal preps ----------
+const macroSchema = z.number().min(0).max(100000);
+
+export const mealIngredientSchema = z.object({
+  name: z.string().min(1).max(120),
+  quantity: z.string().max(40).nullish(),
+});
+
+export const mealPrepCreateSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).max(120),
+  description: z.string().max(500).nullish(),
+  instructions: z.string().max(8000).nullish(),
+  prepMinutes: z.number().int().min(0).max(1440).nullish(),
+  portions: z.number().int().min(1).max(100).optional(),
+  // Whether the macros below describe one portion or the whole batch. Stored
+  // as entered; the other view is derived from `portions`.
+  basis: z.enum(["portion", "total"]).optional(),
+  calories: macroSchema.nullish(),
+  proteinG: macroSchema.nullish(),
+  carbsG: macroSchema.nullish(),
+  fatG: macroSchema.nullish(),
+  ingredients: z.array(mealIngredientSchema).max(60).optional(),
+  sortOrder: z.number().int().optional(),
+});
+
+export const mealPrepPatchSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    description: z.string().max(500).nullable().optional(),
+    instructions: z.string().max(8000).nullable().optional(),
+    prepMinutes: z.number().int().min(0).max(1440).nullable().optional(),
+    portions: z.number().int().min(1).max(100).optional(),
+    basis: z.enum(["portion", "total"]).optional(),
+    calories: macroSchema.nullable().optional(),
+    proteinG: macroSchema.nullable().optional(),
+    carbsG: macroSchema.nullable().optional(),
+    fatG: macroSchema.nullable().optional(),
+    ingredients: z.array(mealIngredientSchema).max(60).optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .strict();

@@ -47,11 +47,16 @@ private struct LaunchPlaceholder: View {
 // icon in Today's toolbar; they are all answers to "how am I doing over time",
 // so they are now one Progress surface. Today · Tasks · Habits · Progress maps
 // to: the day, what I have to do, what I do every day, how it is going.
+//
+// Health is the fifth and last: workouts, meal preps and the shopping list.
+// Five is the ceiling — a sixth tab would push the iPhone tab bar into a
+// "More" menu, so anything further has to become a segment of one of these.
 
 enum AppSection: String, CaseIterable, Identifiable {
     case today
     case tasks
     case habits
+    case health
     case progress
 
     var id: String { rawValue }
@@ -61,6 +66,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .today: "Overview"
         case .tasks: "Tasks"
         case .habits: "Habits"
+        case .health: "Health"
         case .progress: "Progress"
         }
     }
@@ -73,6 +79,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .today: "sun.max.fill"
         case .tasks: "checklist"
         case .habits: "repeat"
+        case .health: "heart.fill"
         case .progress: "chart.bar.fill"
         }
     }
@@ -82,6 +89,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .today: ItemColor.amber.color
         case .tasks: ItemColor.blue.color
         case .habits: ItemColor.violet.color
+        case .health: ItemColor.rose.color
         case .progress: ItemColor.green.color
         }
     }
@@ -150,7 +158,7 @@ struct MainShell: View {
     }
 
     #if os(macOS)
-    /// ⌘1–⌘4 jump to the sections.
+    /// ⌘1–⌘5 jump to the sections.
     private var sectionShortcuts: some View {
         Group {
             ForEach(Array(AppSection.allCases.enumerated()), id: \.element) { index, section in
@@ -171,6 +179,7 @@ struct MainShell: View {
         case .today: TodayView()
         case .tasks: TasksView()
         case .habits: HabitsView()
+        case .health: HealthHubView()
         case .progress: ProgressHubView()
         }
     }

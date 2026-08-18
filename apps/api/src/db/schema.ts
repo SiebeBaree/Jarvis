@@ -32,6 +32,8 @@ export const goalHorizon = pgEnum("goal_horizon", ["short", "long"]);
 export const taskStatus = pgEnum("task_status", ["open", "done", "cancelled"]);
 export const taskPriority = pgEnum("task_priority", ["low", "medium", "high"]);
 export const habitType = pgEnum("habit_type", ["daily", "multi_daily", "weekly_frequency"]);
+// Whether a meal prep's macros were entered per portion or for the whole batch.
+export const macrosBasis = pgEnum("macros_basis", ["portion", "total"]);
 
 // ---------- auth ----------
 export const users = pgTable("users", {
@@ -362,3 +364,176 @@ export const dailyScores = pgTable("daily_scores", {
   isFinal: boolean("is_final").notNull().default(false),
   computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.userId, t.dayKey] })]);
+
+// ---------- workouts ----------
+//
+// The tracker answers one question at the rack: "what did I do last time, and
+// what am I doing now". That shape drives the model:
+//
+//   routine   — a template the user writes ("Leg day"), an ordered list of
+//               exercises with targets. Editable, reusable, never generated.
+//   session   — one actual visit to the gym, optionally started from a
+//               routine. Copies nothing: it references the routine, and the
+//               sets logged against it are the record.
+//   set       — one working set. Sets are the atomic unit, so "last time"
+//               is a query (the most recent session that has sets for this
+//               exercise) rather than a denormalized column that can drift.
+//
+// Weights are kilograms throughout; the user lifts in kg and a unit column
+// nobody would ever change is a column that only creates conversion bugs.
+
+export const exercises = pgTable("exercises", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  muscleGroup: text("muscle_group"), // "Chest", "Back", ... free text
+  equipment: text("equipment"), // "Barbell", "Dumbbell", "Machine", "Bodyweight"
+  // Bodyweight exercises log reps with no weight, so the logger hides the
+  // weight field instead of asking for a 0 nobody means.
+  isBodyweight: boolean("is_bodyweight").notNull().default(false),
+  notes: text("notes"),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("exercises_user_name_uq").on(t.userId, t.name)]);
+
+export const workoutRoutines = pgTable("workout_routines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(), // "Leg day", "Chest & Back"
+  emoji: varchar("emoji", { length: 16 }),
+  colorHex: varchar("color_hex", { length: 9 }),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("workout_routines_user_name_uq").on(t.userId, t.name)]);
+
+export const workoutRoutineExercises = pgTable("workout_routine_exercises", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  routineId: uuid("routine_id")
+    .notNull()
+    .references(() => workoutRoutines.id, { onDelete: "cascade" }),
+  exerciseId: uuid("exercise_id")
+    .notNull()
+    .references(() => exercises.id, { onDelete: "cascade" }),
+  targetSets: smallint("target_sets").notNull().default(3),
+  // A rep range ("8-12"), because that is how a program is actually written.
+  // Equal low/high renders as a single number.
+  targetRepsLow: smallint("target_reps_low"),
+  targetRepsHigh: smallint("target_reps_high"),
+  targetWeightKg: numeric("target_weight_kg", { precision: 7, scale: 2, mode: "number" }),
+  restSeconds: integer("rest_seconds"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [
+  index("wre_routine_idx").on(t.routineId, t.sortOrder),
+  uniqueIndex("wre_routine_exercise_uq").on(t.routineId, t.exerciseId),
+]);
+
+export const workoutSessions = pgTable("workout_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Kept when the routine is deleted: a session is a historical fact and must
+  // not disappear because a template was tidied up.
+  routineId: uuid("routine_id").references(() => workoutRoutines.id, { onDelete: "set null" }),
+  title: text("title").notNull(), // snapshot of the routine name, or free text
+  dayKey: date("day_key").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }), // null = in progress
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("workout_sessions_user_day_idx").on(t.userId, t.dayKey)]);
+
+export const workoutSets = pgTable("workout_sets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id")
+    .notNull()
+    .references(() => workoutSessions.id, { onDelete: "cascade" }),
+  exerciseId: uuid("exercise_id")
+    .notNull()
+    .references(() => exercises.id, { onDelete: "cascade" }),
+  setIndex: smallint("set_index").notNull(), // 1-based, per exercise per session
+  weightKg: numeric("weight_kg", { precision: 7, scale: 2, mode: "number" }),
+  reps: smallint("reps"),
+  // Warm-ups are logged but excluded from volume, bests and progression.
+  isWarmup: boolean("is_warmup").notNull().default(false),
+  completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("workout_sets_session_idx").on(t.sessionId, t.exerciseId, t.setIndex),
+  index("workout_sets_user_exercise_idx").on(t.userId, t.exerciseId),
+]);
+
+// ---------- shopping list ----------
+// One standing list, not many. The whole feature exists because things get
+// forgotten between "I should buy that" and standing in the shop, so adding
+// is one field and checking off is one tap. `checkedAt` rather than a boolean
+// so "clear what I already picked up" is a single ranged delete.
+
+export const shoppingItems = pgTable("shopping_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  quantity: text("quantity"), // free text: "2 kg", "3x", "500 g"
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("shopping_items_user_idx").on(t.userId, t.checkedAt)]);
+
+// ---------- meal preps ----------
+// A cookbook of things the user already knows work. Macros are entered the
+// way they were worked out — per portion or for the whole batch — and the
+// basis is stored rather than normalized, so the numbers shown back are the
+// numbers that were typed in, and the other view is derived from `portions`.
+
+export const mealPreps = pgTable("meal_preps", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  instructions: text("instructions"), // how to prepare it, free text
+  prepMinutes: integer("prep_minutes"),
+  portions: smallint("portions").notNull().default(1),
+  basis: macrosBasis("basis").notNull().default("total"),
+  calories: numeric("calories", { precision: 8, scale: 1, mode: "number" }),
+  proteinG: numeric("protein_g", { precision: 7, scale: 1, mode: "number" }),
+  carbsG: numeric("carbs_g", { precision: 7, scale: 1, mode: "number" }),
+  fatG: numeric("fat_g", { precision: 7, scale: 1, mode: "number" }),
+  // Photo on Vercel Blob (private store), same contract as progress photos.
+  blobKey: text("blob_key"),
+  blobUrl: text("blob_url"),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("meal_preps_user_name_uq").on(t.userId, t.name)]);
+
+export const mealPrepIngredients = pgTable("meal_prep_ingredients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  mealPrepId: uuid("meal_prep_id")
+    .notNull()
+    .references(() => mealPreps.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  quantity: text("quantity"), // free text, so it can go straight onto the list
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("meal_prep_ingredients_meal_idx").on(t.mealPrepId, t.sortOrder)]);

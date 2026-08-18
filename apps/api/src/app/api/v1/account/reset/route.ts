@@ -11,15 +11,23 @@ import {
   dailyScores,
   goalMilestones,
   goals,
+  exercises,
   habitCompletions,
   habits,
   improvementAreas,
+  mealPrepIngredients,
+  mealPreps,
   metricEntries,
   metricTypes,
   moodEntries,
   progressPhotos,
   recurrenceTemplates,
+  shoppingItems,
   tasks,
+  workoutRoutineExercises,
+  workoutRoutines,
+  workoutSessions,
+  workoutSets,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import { handler, parseBody } from "@/lib/http";
@@ -34,7 +42,7 @@ export const POST = handler(async (request: Request) => {
   const userId = ctx.userId;
 
   // Best-effort blob cleanup (photos live outside Postgres).
-  const [photos, checkins] = await Promise.all([
+  const [photos, checkins, meals] = await Promise.all([
     db.query.progressPhotos.findMany({
       where: eq(progressPhotos.userId, userId),
       columns: { blobKey: true },
@@ -43,8 +51,14 @@ export const POST = handler(async (request: Request) => {
       where: eq(areaCheckins.userId, userId),
       columns: { blobKey: true },
     }),
+    db.query.mealPreps.findMany({
+      where: eq(mealPreps.userId, userId),
+      columns: { blobKey: true },
+    }),
   ]);
-  const blobKeys = [...photos, ...checkins].map((r) => r.blobKey);
+  const blobKeys = [...photos, ...checkins, ...meals]
+    .map((r) => r.blobKey)
+    .filter((key): key is string => key !== null);
   if (blobKeys.length > 0 && process.env.BLOB_READ_WRITE_TOKEN) {
     try {
       const { del } = await import("@vercel/blob");
@@ -72,6 +86,16 @@ export const POST = handler(async (request: Request) => {
   await db.delete(metricEntries).where(eq(metricEntries.userId, userId));
   await db.delete(metricTypes).where(eq(metricTypes.userId, userId));
   await db.delete(progressPhotos).where(eq(progressPhotos.userId, userId));
+
+  await db.delete(workoutSets).where(eq(workoutSets.userId, userId));
+  await db.delete(workoutSessions).where(eq(workoutSessions.userId, userId));
+  await db.delete(workoutRoutineExercises).where(eq(workoutRoutineExercises.userId, userId));
+  await db.delete(workoutRoutines).where(eq(workoutRoutines.userId, userId));
+  await db.delete(exercises).where(eq(exercises.userId, userId));
+
+  await db.delete(mealPrepIngredients).where(eq(mealPrepIngredients.userId, userId));
+  await db.delete(mealPreps).where(eq(mealPreps.userId, userId));
+  await db.delete(shoppingItems).where(eq(shoppingItems.userId, userId));
 
   return NextResponse.json({ ok: true });
 });
