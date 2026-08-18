@@ -24,6 +24,12 @@ export const PATCH = handler(async (request: Request) => {
   if (patch.weekStartsOn !== undefined) set.weekStartsOn = patch.weekStartsOn;
   if (patch.scoreWeights !== undefined) set.scoreWeights = patch.scoreWeights;
   if (patch.moodScaleMax !== undefined) set.moodScaleMax = patch.moodScaleMax;
+  if (patch.checkinNotificationsEnabled !== undefined) {
+    set.checkinNotificationsEnabled = patch.checkinNotificationsEnabled;
+  }
+  if (patch.checkinNotificationHour !== undefined) {
+    set.checkinNotificationHour = patch.checkinNotificationHour;
+  }
 
   const [updated] = await db
     .update(settings)

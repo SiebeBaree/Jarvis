@@ -54,6 +54,24 @@ export const settingsPatchSchema = z
       })
       .optional(),
     moodScaleMax: z.number().int().min(2).max(10).optional(),
+    checkinNotificationsEnabled: z.boolean().optional(),
+    checkinNotificationHour: z.number().int().min(0).max(23).optional(),
+  })
+  .strict();
+
+// ---------- devices (APNs) ----------
+export const deviceRegisterSchema = z
+  .object({
+    // APNs tokens are hex. Length has grown before, so only the shape is fixed.
+    deviceToken: z.string().regex(/^[0-9a-fA-F]{16,}$/, { message: "must be a hex APNs token" }),
+    platform: z.literal("ios"),
+    environment: z.enum(["sandbox", "production"]),
+  })
+  .strict();
+
+export const deviceRevokeSchema = z
+  .object({
+    deviceToken: z.string().min(16),
   })
   .strict();
 

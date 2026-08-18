@@ -34,6 +34,10 @@ export const taskPriority = pgEnum("task_priority", ["low", "medium", "high"]);
 export const habitType = pgEnum("habit_type", ["daily", "multi_daily", "weekly_frequency"]);
 // Whether a meal prep's macros were entered per portion or for the whole batch.
 export const macrosBasis = pgEnum("macros_basis", ["portion", "total"]);
+// Which APNs host a device token belongs to. A Debug build on the phone gets a
+// sandbox token while still talking to the production API, so the environment
+// has to travel with the token rather than be inferred from the server.
+export const deviceEnvironment = pgEnum("device_environment", ["sandbox", "production"]);
 
 // ---------- auth ----------
 export const users = pgTable("users", {
@@ -70,6 +74,11 @@ export const settings = pgTable("settings", {
     .notNull()
     .default(sql`'{"tasks":40,"habits":40,"feel":20}'::jsonb`),
   moodScaleMax: smallint("mood_scale_max").notNull().default(5), // UI renders 1..5; stored 0..100
+  // The daily check-in nudge. It lives here rather than per device because it
+  // is a fact about the person and their timezone, not about a phone, and the
+  // cron already loads settings to work out the local hour.
+  checkinNotificationsEnabled: boolean("checkin_notifications_enabled").notNull().default(false),
+  checkinNotificationHour: smallint("checkin_notification_hour").notNull().default(20), // 0-23, user-local
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -537,3 +546,39 @@ export const mealPrepIngredients = pgTable("meal_prep_ingredients", {
   quantity: text("quantity"), // free text, so it can go straight onto the list
   sortOrder: integer("sort_order").notNull().default(0),
 }, (t) => [index("meal_prep_ingredients_meal_idx").on(t.mealPrepId, t.sortOrder)]);
+
+// ---------- push notifications ----------
+// A device is a registered APNs token, nothing more. The app posts its token on
+// every launch, so the token itself is the natural key: re-registering an
+// existing token reactivates the row instead of accumulating duplicates.
+// Only iOS registers; the Mac build never asks for a token.
+
+export const devices = pgTable("devices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  deviceToken: text("device_token").notNull().unique(), // APNs token, hex
+  platform: text("platform").notNull().default("ios"),
+  environment: deviceEnvironment("environment").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  // null = active. Set on sign-out, or when APNs reports the token is dead.
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+}, (t) => [index("devices_user_idx").on(t.userId, t.revokedAt)]);
+
+// One row per notification actually sent, and the reason it is here is dedupe:
+// the cron runs hourly and localhost shares this database with production, so
+// the row is claimed before sending. An insert that conflicts means someone
+// else already has the day, and this run stays quiet.
+export const notificationLog = pgTable("notification_log", {
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  dayKey: date("day_key").notNull(),
+  kind: text("kind").notNull().default("checkin_nudge"),
+  status: text("status").notNull().default("pending"), // pending -> sent
+  template: text("template"), // which category and variant fired, for debugging
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.dayKey, t.kind] })]);
