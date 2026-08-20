@@ -1,7 +1,8 @@
 import Foundation
 
 public enum APIClientError: Error, LocalizedError, Sendable {
-    /// 401 — the app should clear the stored token and return to login.
+    /// The stored bearer token was rejected: clear it and return to login.
+    /// NOT every 401. See `failure(status:data:)`.
     case unauthorized
     case api(code: String, message: String, status: Int)
     case network(underlying: String)
@@ -9,10 +10,10 @@ public enum APIClientError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .unauthorized: "Session expired. Please sign in again."
+        case .unauthorized: "Your session expired. Sign in again to continue."
         case .api(_, let message, _): message
-        case .network: "Could not reach the server. Check your connection."
-        case .decoding: "Unexpected response from the server."
+        case .network: "Could not reach Jarvis. Check your connection and try again."
+        case .decoding: "Jarvis could not read the server's reply. Try again."
         }
     }
 }
@@ -78,6 +79,25 @@ public actor APIClient {
             let message: String
         }
         let error: Payload
+    }
+
+    /// Turns a non-2xx response into the error the UI should show.
+    ///
+    /// A 401 used to short-circuit straight to `.unauthorized` without reading
+    /// the body, which meant a wrong password on the login screen reported
+    /// "Session expired", wrong twice over: there was no session yet, and the
+    /// server had already said `invalid_credentials`. Only the server's own
+    /// `unauthorized` code (a rejected bearer token) signs the user out now;
+    /// every other 401 carries its real message through.
+    private func failure(status: Int, data: Data) -> APIClientError {
+        let envelope = try? decoder.decode(ErrorEnvelope.self, from: data)
+        if status == 401, (envelope?.error.code ?? "unauthorized") == "unauthorized" {
+            return .unauthorized
+        }
+        guard let envelope else {
+            return .api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+        }
+        return .api(code: envelope.error.code, message: envelope.error.message, status: status)
     }
 
     /// Transient failures worth retrying: the connection never produced a
@@ -151,16 +171,8 @@ public actor APIClient {
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw APIClientError.unauthorized }
         guard (200..<300).contains(status) else {
-            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
-                throw APIClientError.api(
-                    code: envelope.error.code,
-                    message: envelope.error.message,
-                    status: status,
-                )
-            }
-            throw APIClientError.api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+            throw failure(status: status, data: data)
         }
 
         do {
@@ -218,16 +230,8 @@ public actor APIClient {
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw APIClientError.unauthorized }
         guard (200..<300).contains(status) else {
-            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
-                throw APIClientError.api(
-                    code: envelope.error.code,
-                    message: envelope.error.message,
-                    status: status,
-                )
-            }
-            throw APIClientError.api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+            throw failure(status: status, data: data)
         }
     }
 
@@ -252,16 +256,8 @@ public actor APIClient {
         }
 
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401 { throw APIClientError.unauthorized }
         guard (200..<300).contains(status) else {
-            if let envelope = try? decoder.decode(ErrorEnvelope.self, from: data) {
-                throw APIClientError.api(
-                    code: envelope.error.code,
-                    message: envelope.error.message,
-                    status: status,
-                )
-            }
-            throw APIClientError.api(code: "http_\(status)", message: "Request failed (\(status))", status: status)
+            throw failure(status: status, data: data)
         }
 
         do {

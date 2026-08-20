@@ -4,7 +4,9 @@ import {
   goalPatchSchema,
   habitLogSchema,
   isValidTimezone,
+  loginSchema,
   metricEntriesQuerySchema,
+  registerSchema,
   settingsPatchSchema,
   taskCreateSchema,
 } from "../src/lib/validation";
@@ -103,5 +105,28 @@ describe("goal schemas", () => {
     expect(goalPatchSchema.safeParse({}).success).toBe(true);
     expect(goalPatchSchema.safeParse({ status: "achieved" }).success).toBe(true);
     expect(goalPatchSchema.safeParse({ blockId: UUID }).success).toBe(false);
+  });
+});
+
+describe("auth email normalisation", () => {
+  it("lower-cases and trims the login email", () => {
+    const parsed = loginSchema.parse({ email: "  Bareesiebe@Gmail.com \n", password: "x" });
+    expect(parsed.email).toBe("bareesiebe@gmail.com");
+  });
+
+  it("normalises the same way at registration, so the two always agree", () => {
+    const registered = registerSchema.parse({ email: " SIEBE@Example.COM ", password: "longenough" });
+    const loggedIn = loginSchema.parse({ email: "siebe@example.com", password: "longenough" });
+    expect(registered.email).toBe(loggedIn.email);
+  });
+
+  it("still rejects an address that is not an address", () => {
+    expect(loginSchema.safeParse({ email: "not-an-email", password: "x" }).success).toBe(false);
+    expect(loginSchema.safeParse({ email: "", password: "x" }).success).toBe(false);
+  });
+
+  it("requires a password of at least 8 characters to register", () => {
+    expect(registerSchema.safeParse({ email: "a@b.com", password: "short" }).success).toBe(false);
+    expect(registerSchema.safeParse({ email: "a@b.com", password: "longenough" }).success).toBe(true);
   });
 });

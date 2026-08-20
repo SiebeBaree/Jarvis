@@ -70,11 +70,13 @@ struct LoginView: View {
                 TextField("Email", text: $email)
                     .focused($focus, equals: .email)
                     .onSubmit { focus = .password }
+                    // Outside the #if: the Mac needs this just as much, and it
+                    // was iOS-only while the Mac quietly autocorrected.
+                    .autocorrectionDisabled()
                     #if os(iOS)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .textContentType(.emailAddress)
-                    .autocorrectionDisabled()
                     #endif
             }
 
@@ -155,11 +157,40 @@ struct LoginView: View {
         .buttonStyle(.jarvisGhost)
     }
 
+    /// What actually gets sent. The server normalises too, but doing it here
+    /// keeps the field honest about what was submitted.
+    private var normalizedEmail: String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var emailLooksValid: Bool {
+        let parts = normalizedEmail.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty else { return false }
+        let domain = parts[1]
+        return domain.contains(".") && !domain.hasPrefix(".") && !domain.hasSuffix(".")
+    }
+
+    /// Catches the obvious mistakes before a round-trip, so the user reads a
+    /// plain sentence instead of a schema error like
+    /// "email: Enter a valid email address".
+    private var validationProblem: String? {
+        if !emailLooksValid { return "That email address doesn't look right." }
+        guard isRegistering else { return nil }
+        if password.count < 8 { return "Choose a password of at least 8 characters." }
+        if password != confirmPassword { return "Those passwords don't match." }
+        return nil
+    }
+
     private func submit() {
         guard canSubmit else { return }
-        if isRegistering, password != confirmPassword {
+        // The Mac has no autocapitalization switch for text fields, so a
+        // capitalised or space-padded address arrives here routinely. Show the
+        // cleaned-up version rather than sending something the field denies.
+        if email != normalizedEmail { email = normalizedEmail }
+
+        if let problem = validationProblem {
             Haptics.play(.warning)
-            errorMessage = "Those passwords don't match."
+            errorMessage = problem
             return
         }
         isSubmitting = true
@@ -167,7 +198,7 @@ struct LoginView: View {
         Task {
             defer { isSubmitting = false }
             do {
-                try await model.signIn(email: email, password: password, register: isRegistering)
+                try await model.signIn(email: normalizedEmail, password: password, register: isRegistering)
             } catch {
                 Haptics.play(.warning)
                 errorMessage = error.localizedDescription

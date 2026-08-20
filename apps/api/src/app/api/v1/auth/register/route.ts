@@ -11,7 +11,13 @@ export const POST = handler(async (request: Request) => {
   const body = await parseBody(request, registerSchema);
 
   const existing = await db.query.users.findFirst();
-  if (existing) throw new ApiError(409, "account_exists", "An account already exists");
+  if (existing) {
+    throw new ApiError(
+      409,
+      "account_exists",
+      "An account already exists on this server. Sign in with it instead.",
+    );
+  }
 
   const [user] = await db
     .insert(users)

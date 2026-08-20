@@ -13,15 +13,28 @@ export const timeSchema = z
 export const prioritySchema = z.enum(["low", "medium", "high"]);
 
 // ---------- auth ----------
+/**
+ * Trimmed and lower-cased before validation, because the login lookup used to
+ * be an exact string match: a capitalised first letter or a trailing space
+ * from a paste answered "Email or password is incorrect" on a perfectly good
+ * password. Registration normalises through the same schema, so stored
+ * addresses and looked-up addresses always agree.
+ */
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email({ message: "Enter a valid email address" });
+
 export const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: emailSchema,
+  password: z.string().min(1, { message: "Enter your password" }),
   deviceName: z.string().max(120).nullish(),
 });
 
 export const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8, { message: "password must be at least 8 characters" }),
+  email: emailSchema,
+  password: z.string().min(8, { message: "Password must be at least 8 characters" }),
 });
 
 // ---------- settings ----------
