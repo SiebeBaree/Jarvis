@@ -64,6 +64,20 @@
       "when": 1787058384654,
       "tag": "0008_dazzling_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787681532216,
+      "tag": "0009_glorious_squadron_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787681549518,
+      "tag": "0010_reflective_chronomancer",
+      "breakpoints": true
     }
   ]
 }

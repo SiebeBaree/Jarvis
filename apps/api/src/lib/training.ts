@@ -16,6 +16,7 @@ import {
   workoutRoutines,
   workoutSessions,
   workoutSets,
+  type LoadStyle,
 } from "@/db/schema";
 import { ApiError } from "./http";
 import { volumeOf, workingSetCount } from "./training-math";
@@ -102,7 +103,7 @@ export interface SessionExerciseDTO {
   exerciseId: string;
   name: string;
   muscleGroup: string | null;
-  equipment: string | null;
+  loadStyle: LoadStyle;
   isBodyweight: boolean;
   /** From the routine. Null when the exercise was added ad hoc mid-workout. */
   target: ExerciseTargetDTO | null;
@@ -264,7 +265,7 @@ export interface RoutineExerciseDTO {
   exerciseId: string;
   name: string;
   muscleGroup: string | null;
-  equipment: string | null;
+  loadStyle: LoadStyle;
   isBodyweight: boolean;
   targetSets: number;
   targetRepsLow: number | null;
@@ -308,7 +309,7 @@ export async function routineDetail(userId: string, id: string): Promise<Routine
       exerciseId: row.exercise.id,
       name: row.exercise.name,
       muscleGroup: row.exercise.muscleGroup,
-      equipment: row.exercise.equipment,
+      loadStyle: row.exercise.loadStyle,
       isBodyweight: row.exercise.isBodyweight,
       targetSets: row.line.targetSets,
       targetRepsLow: row.line.targetRepsLow,
@@ -395,7 +396,7 @@ export async function buildSessionDetail(
       exerciseId: entry.exercise.id,
       name: entry.exercise.name,
       muscleGroup: entry.exercise.muscleGroup,
-      equipment: entry.exercise.equipment,
+      loadStyle: entry.exercise.loadStyle,
       isBodyweight: entry.exercise.isBodyweight,
       target: entry.target,
       sets: setsByExercise.get(entry.exercise.id) ?? [],

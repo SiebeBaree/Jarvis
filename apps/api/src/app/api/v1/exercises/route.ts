@@ -37,7 +37,7 @@ export const POST = handler(async (request: Request) => {
     userId: ctx.userId,
     name,
     muscleGroup: body.muscleGroup ?? null,
-    equipment: body.equipment ?? null,
+    loadStyle: body.loadStyle ?? "plates",
     isBodyweight: body.isBodyweight ?? false,
     notes: body.notes ?? null,
   });

@@ -7,7 +7,8 @@ public struct ExerciseDTO: Codable, Sendable, Identifiable, Equatable {
     public let id: String
     public let name: String
     public let muscleGroup: String?
-    public let equipment: String?
+    /// Which weight ladder the logger steps through for this movement.
+    public let loadStyle: LoadStyle
     public let isBodyweight: Bool
     public let notes: String?
     public let archivedAt: String?
@@ -16,7 +17,7 @@ public struct ExerciseDTO: Codable, Sendable, Identifiable, Equatable {
         id: String,
         name: String,
         muscleGroup: String? = nil,
-        equipment: String? = nil,
+        loadStyle: LoadStyle = .plates,
         isBodyweight: Bool = false,
         notes: String? = nil,
         archivedAt: String? = nil,
@@ -24,7 +25,7 @@ public struct ExerciseDTO: Codable, Sendable, Identifiable, Equatable {
         self.id = id
         self.name = name
         self.muscleGroup = muscleGroup
-        self.equipment = equipment
+        self.loadStyle = loadStyle
         self.isBodyweight = isBodyweight
         self.notes = notes
         self.archivedAt = archivedAt
@@ -59,7 +60,7 @@ public struct RoutineExerciseDTO: Codable, Sendable, Identifiable, Equatable {
     public let exerciseId: String
     public let name: String
     public let muscleGroup: String?
-    public let equipment: String?
+    public let loadStyle: LoadStyle
     public let isBodyweight: Bool
     public let targetSets: Int
     public let targetRepsLow: Int?
@@ -157,7 +158,7 @@ public struct SessionExerciseDTO: Codable, Sendable, Identifiable, Equatable {
     public let exerciseId: String
     public let name: String
     public let muscleGroup: String?
-    public let equipment: String?
+    public let loadStyle: LoadStyle
     public let isBodyweight: Bool
     public let target: SessionTargetDTO?
     public let sets: [WorkoutSetDTO]
@@ -236,12 +237,28 @@ public struct ExerciseHistoryResponse: Codable, Sendable {
 // lets the queued request catch up. Fields stay immutable; these build copies.
 
 extension SessionExerciseDTO {
+    /// Correcting the ladder mid-workout, which is when a wrong one is
+    /// noticed. Applied locally first so the +/- buttons change on the tap.
+    public func with(loadStyle newLoadStyle: LoadStyle) -> SessionExerciseDTO {
+        SessionExerciseDTO(
+            exerciseId: exerciseId,
+            name: name,
+            muscleGroup: muscleGroup,
+            loadStyle: newLoadStyle,
+            isBodyweight: isBodyweight,
+            target: target,
+            sets: sets,
+            previous: previous,
+            best: best,
+        )
+    }
+
     public func with(sets newSets: [WorkoutSetDTO]) -> SessionExerciseDTO {
         SessionExerciseDTO(
             exerciseId: exerciseId,
             name: name,
             muscleGroup: muscleGroup,
-            equipment: equipment,
+            loadStyle: loadStyle,
             isBodyweight: isBodyweight,
             target: target,
             sets: newSets.sorted { $0.setIndex < $1.setIndex },
@@ -295,7 +312,7 @@ extension SessionDetailDTO {
                 exerciseId: exercise.id,
                 name: exercise.name,
                 muscleGroup: exercise.muscleGroup,
-                equipment: exercise.equipment,
+                loadStyle: exercise.loadStyle,
                 isBodyweight: exercise.isBodyweight,
                 target: nil,
                 sets: [],

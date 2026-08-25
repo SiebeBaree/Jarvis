@@ -21,7 +21,7 @@ export const PATCH = handler(
     const set: Partial<typeof exercises.$inferInsert> = {};
     if (patch.name !== undefined) set.name = patch.name.trim();
     if (patch.muscleGroup !== undefined) set.muscleGroup = patch.muscleGroup;
-    if (patch.equipment !== undefined) set.equipment = patch.equipment;
+    if (patch.loadStyle !== undefined) set.loadStyle = patch.loadStyle;
     if (patch.isBodyweight !== undefined) set.isBodyweight = patch.isBodyweight;
     if (patch.notes !== undefined) set.notes = patch.notes;
     if (patch.archived === true) set.archivedAt = existing.archivedAt ?? new Date();

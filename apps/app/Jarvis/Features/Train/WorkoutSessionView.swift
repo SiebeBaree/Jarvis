@@ -130,6 +130,9 @@ struct WorkoutSessionView: View {
                                 name: exercise.name,
                             )
                         },
+                        onSetLoadStyle: { style in
+                            store.setLoadStyle(style, forExercise: exercise.exerciseId, in: sessionId)
+                        },
                     )
                 }
 
@@ -223,6 +226,7 @@ private struct ExerciseCard: View {
     let onLog: (Double?, Int?, Bool) -> Void
     let onEditSet: (WorkoutSetDTO) -> Void
     let onShowProgress: () -> Void
+    let onSetLoadStyle: (LoadStyle) -> Void
 
     @State private var weight: Double = 0
     @State private var reps: Int = 0
@@ -279,13 +283,32 @@ private struct ExerciseCard: View {
         .jarvisAnimation(Motion.pop, value: exercise.isComplete)
     }
 
+    /// The plan, said as a top set rather than as one weight for every set.
+    ///
+    /// "3 × 6-12 @ 160" claimed all three sets were at 160, which was never
+    /// true for anything trained hard: the second set comes off by a plate a
+    /// side and the third by another. The number worth aiming at is the
+    /// heaviest one, and the sets under it are recorded, not prescribed.
     private func targetLine(_ target: SessionTargetDTO) -> String {
-        var text = "\(exercise.workingSets.count)/\(target.sets) sets"
-        if let reps = target.repsLabel { text += " × \(reps)" }
-        if let weight = target.weightKg, weight > 0 {
-            text += " @ \(Format.load(weight, isBodyweight: exercise.isBodyweight))"
+        let progress = "\(exercise.workingSets.count)/\(target.sets) sets"
+        guard let weight = target.weightKg, weight > 0 else {
+            guard let reps = target.repsLabel else { return progress }
+            return "\(progress) × \(reps)"
         }
-        return text
+        let load = Format.load(weight, isBodyweight: exercise.isBodyweight)
+        guard let reps = target.repsLabel else { return "\(progress) · top set \(load)" }
+        return "\(progress) · top set \(load) × \(reps)"
+    }
+
+    /// The heaviest set ever logged here, which under a top-set plan is the
+    /// number actually being chased. Skipped when the best set was set in the
+    /// session shown right above it, where repeating it says nothing new.
+    private var bestLine: String? {
+        guard let best = exercise.best, let weight = best.weightKg, weight > 0, let reps = best.reps
+        else { return nil }
+        if let previous = exercise.previous, previous.dayKey == best.dayKey { return nil }
+        let load = Format.load(weight, isBodyweight: exercise.isBodyweight)
+        return "Best \(load) × \(reps) · \(HabitDisplay.shortLabel(for: best.dayKey))"
     }
 
     /// The whole reason this screen exists.
@@ -305,6 +328,11 @@ private struct ExerciseCard: View {
                     Text("Last time · \(HabitDisplay.shortLabel(for: previous.dayKey))")
                         .font(.microJ)
                         .foregroundStyle(Color.textTertiary)
+                    if let bestLine {
+                        Text(bestLine)
+                            .font(.microJ)
+                            .foregroundStyle(Color.textTertiary)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -356,8 +384,9 @@ private struct ExerciseCard: View {
         (exercise.workingSets.firstIndex { $0.id == set.id } ?? 0) + 1
     }
 
-    /// How this set compares with the same set number last time — the little
-    /// "+2.5" that makes progressive overload visible without any charts.
+    /// How this set compares with the same set number last time, which is the
+    /// only fair comparison once the weight changes between sets: a third set
+    /// 80 kg under the first is the plan, not a regression.
     private func comparison(for set: WorkoutSetDTO) -> (label: String, symbol: String, color: Color)? {
         guard !set.isWarmup,
               let previous = exercise.previous?.workingSets,
@@ -392,21 +421,32 @@ private struct ExerciseCard: View {
                 // and 0 simply means you carried nothing extra.
                 NumberStepper(
                     value: $weight,
-                    step: 2.5,
+                    advance: { current, direction in
+                        exercise.loadStyle.stepped(current, direction: direction)
+                    },
                     range: 0...600,
-                    unit: exercise.isBodyweight ? "+kg" : "kg",
+                    accessibilityUnit: "kilograms",
                     format: Format.weight,
-                )
+                ) {
+                    loadStyleChip
+                }
                 NumberStepper(
                     value: Binding(
                         get: { Double(reps) },
                         set: { reps = Int($0) },
                     ),
-                    step: 1,
+                    advance: { current, direction in current + Double(direction) },
                     range: 0...100,
-                    unit: "reps",
+                    accessibilityUnit: "reps",
                     format: { String(Int($0)) },
-                )
+                ) {
+                    Text("reps")
+                        .font(.microJ)
+                        .foregroundStyle(Color.textTertiary)
+                }
+                // Reps never need more than three digits; the weight can read
+                // "142.5" and carries the ladder chip, so it gets the room.
+                .frame(maxWidth: 116)
             }
 
             HStack(spacing: Space.sm) {
@@ -434,121 +474,65 @@ private struct ExerciseCard: View {
         }
     }
 
-    /// Fills the control with the most useful guess: what you just lifted, or
-    /// what you lifted last time at this set number, or the routine's target.
+    /// The ladder this movement steps through, changeable without leaving the
+    /// workout. Sitting under the number is deliberate: a wrong ladder is
+    /// noticed the first time a button produces a weight the machine cannot
+    /// make, and that happens here.
+    private var loadStyleChip: some View {
+        Menu {
+            Picker("Weight goes up in", selection: loadStyleBinding) {
+                ForEach(LoadStyle.allCases, id: \.self) { style in
+                    Text("\(style.label) · \(style.detail)").tag(style)
+                }
+            }
+        } label: {
+            HStack(spacing: 2) {
+                Text("\(exercise.isBodyweight ? "+kg" : "kg") · \(exercise.loadStyle.shortLabel)")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+            }
+            .font(.microJ)
+            .foregroundStyle(Color.textTertiary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Weight goes up in \(exercise.loadStyle.detail)")
+    }
+
+    private var loadStyleBinding: Binding<LoadStyle> {
+        Binding(get: { exercise.loadStyle }, set: { onSetLoadStyle($0) })
+    }
+
+    /// Fills the control with the most useful guess for the set about to be
+    /// logged.
+    ///
+    /// Last time's set at the *same number* comes first, and that ordering is
+    /// the point: on anything heavy the weight changes between sets, so after
+    /// a top set of 160 the next one is 120. Copying the set just logged
+    /// forward meant dialling 40 kg back off by hand every single time.
     private func prefill(force: Bool = false) {
         guard force || !didPrefill else { return }
         didPrefill = true
+        isWarmup = false
 
-        if let last = exercise.sets.last(where: { !$0.isWarmup }) {
-            weight = last.weightKg ?? 0
-            reps = last.reps ?? 0
-            isWarmup = false
-            return
-        }
         let nextIndex = exercise.workingSets.count
         if let previous = exercise.previous?.workingSets, nextIndex < previous.count {
             weight = previous[nextIndex].weightKg ?? 0
             reps = previous[nextIndex].reps ?? 0
             return
         }
-        if let previous = exercise.previous?.workingSets.first {
-            weight = previous.weightKg ?? 0
-            reps = previous.reps ?? 0
+        // Past where last time stopped: an extra set repeats what was just done.
+        if let last = exercise.sets.last(where: { !$0.isWarmup }) {
+            weight = last.weightKg ?? 0
+            reps = last.reps ?? 0
             return
         }
-        weight = exercise.target?.weightKg ?? 0
-        reps = exercise.target?.repsLow ?? 0
-    }
-}
-
-// MARK: - Number stepper
-
-/// A big-target numeric control: minus, value, plus. Built rather than using
-/// `Stepper` because at the gym this needs a 44 pt hit area and a value you
-/// can read from arm's length, and because tapping the number opens a keypad
-/// for the jump that stepping would take twenty taps to reach.
-struct NumberStepper: View {
-    @Binding var value: Double
-    let step: Double
-    let range: ClosedRange<Double>
-    let unit: String
-    let format: (Double) -> String
-
-    @State private var isEditing = false
-    @State private var draft = ""
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 0) {
-            stepButton("minus") {
-                value = max(range.lowerBound, value - step)
-            }
-
-            Group {
-                if isEditing {
-                    TextField("", text: $draft)
-                        .textFieldStyle(.plain)
-                        .multilineTextAlignment(.center)
-                        .font(.numeralJ)
-                        .focused($fieldFocused)
-                        #if os(iOS)
-                        .keyboardType(.decimalPad)
-                        #endif
-                        .onSubmit(commit)
-                        .onChange(of: fieldFocused) { _, focused in
-                            if !focused { commit() }
-                        }
-                } else {
-                    VStack(spacing: -2) {
-                        Text(format(value))
-                            .font(.numeralJ)
-                            .foregroundStyle(Color.textPrimary)
-                        Text(unit)
-                            .font(.microJ)
-                            .foregroundStyle(Color.textTertiary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        draft = format(value)
-                        isEditing = true
-                        fieldFocused = true
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: RowHeight.tapTarget)
-
-            stepButton("plus") {
-                value = min(range.upperBound, value + step)
-            }
-        }
-        .background(Color.bgSubtle, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-        .frame(maxWidth: .infinity)
-    }
-
-    private func commit() {
-        let cleaned = draft.replacingOccurrences(of: ",", with: ".")
-        if let parsed = Double(cleaned) {
-            value = min(range.upperBound, max(range.lowerBound, parsed))
-        }
-        isEditing = false
-        fieldFocused = false
-    }
-
-    private func stepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
-        Button {
-            action()
-            Haptics.play(.light)
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color.textSecondary)
-                .frame(width: RowHeight.tapTarget, height: RowHeight.tapTarget)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(symbol == "plus" ? "Increase \(unit)" : "Decrease \(unit)")
+        // Nothing to go on: the routine's top set is the plan.
+        let first = exercise.previous?.workingSets.first
+        weight = exercise.target?.weightKg ?? first?.weightKg ?? 0
+        reps = exercise.target?.repsLow ?? first?.reps ?? 0
     }
 }
 

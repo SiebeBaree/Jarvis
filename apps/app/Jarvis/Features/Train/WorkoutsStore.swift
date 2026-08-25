@@ -266,10 +266,47 @@ final class WorkoutsStore {
 
     // MARK: - Exercises
 
+    /// Changes which weight ladder an exercise steps through. Set from the
+    /// logger, because a wrong ladder is discovered standing at the machine
+    /// and fixing it should not mean leaving the workout.
+    func setLoadStyle(_ style: LoadStyle, forExercise exerciseId: String, in sessionId: String) {
+        guard let model else { return }
+        if let detail = details[sessionId] {
+            apply(detail.with(exercises: detail.exercises.map { entry in
+                entry.exerciseId == exerciseId ? entry.with(loadStyle: style) : entry
+            }))
+        }
+        if let index = exercises.firstIndex(where: { $0.id == exerciseId }) {
+            let existing = exercises[index]
+            exercises[index] = ExerciseDTO(
+                id: existing.id,
+                name: existing.name,
+                muscleGroup: existing.muscleGroup,
+                loadStyle: style,
+                isBodyweight: existing.isBodyweight,
+                notes: existing.notes,
+                archivedAt: existing.archivedAt,
+            )
+            model.store.write(exercises, .exercises)
+        }
+        model.mutate(
+            "PATCH",
+            "/exercises/\(exerciseId)",
+            body: ExercisePatchRequest(loadStyle: style),
+            entities: [.exercise],
+            label: style.label,
+        )
+    }
+
     /// Creates an exercise, or hands back the existing one with that name —
     /// the server treats a duplicate name as a reuse so history stays in one
     /// place rather than splitting across two near-identical rows.
-    func createExercise(name: String, muscleGroup: String?, isBodyweight: Bool) async -> ExerciseDTO? {
+    func createExercise(
+        name: String,
+        muscleGroup: String?,
+        loadStyle: LoadStyle,
+        isBodyweight: Bool,
+    ) async -> ExerciseDTO? {
         guard let model else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -281,6 +318,7 @@ final class WorkoutsStore {
                 ExerciseCreateRequest(
                     name: trimmed,
                     muscleGroup: muscleGroup,
+                    loadStyle: loadStyle,
                     isBodyweight: isBodyweight,
                 ),
             )

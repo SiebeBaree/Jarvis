@@ -531,3 +531,44 @@ had every intention of training. Both were arithmetic, not information.
 | The 18:00 rule is deleted, along with `hourOfDay` on the API and `elapsedDays` in Swift | It existed to stop the old formula accusing you at 7 AM. Reachability does not need it: today is a day you can still act on until the day boundary passes. This also fixes the last open item from the 2026-08-18 entry, where a past row could flip from "on pace" to "1 behind" at 18:00 today |
 | On track says "1/5 this week" and nothing else | Silence is the correct output for a week that is going to be fine |
 | The pace tick moves from `target × elapsed / 7` to `max(0, target − daysLeft)` | It now marks the last point where a perfect week is still savable, which is the same number the score's `expected` field carries. Zero for most of the week, so the tick is usually hidden |
+## Weight ladders and top-set targets (2026-08-25)
+
+### Weight goes up the way the machine goes up
+
+The set logger stepped by 2.5 kg everywhere. That is right for a barbell and
+wrong for everything else: a cable stack is a column of 5 lb plates whose
+printed kilogram labels are 2.3, 4.5, 6.8, and dumbbells change gap at 10 kg.
+Twelve of the fifteen exercises in the catalogue were on the wrong ladder, and
+the saved targets show it (cable pushdowns at 31 kg is not a weight that
+machine can make).
+
+| Decision | Rationale |
+|---|---|
+| `exercises.equipment` (free text, NULL on every row, written by nothing) is replaced by `exercises.load_style`, one of `plates`, `dumbbell`, `cable`, `machine`, `free` | The equipment was only ever interesting because it determines the step. Naming the column after the step means one field instead of two |
+| The cable ladder is `round(2.25n, 1)`, not a table | 2.25 kg is 5 lb. The generated sequence reproduces all twenty printed labels exactly and keeps going past 45 kg, where a hardcoded array would stop |
+| Stepping snaps: `+` from 31 kg on a cable lands on 31.5, `−` lands on 29.3 | Weights typed before the ladder existed sit between rungs. Snapping in the direction of travel repairs them on first use rather than needing a migration |
+| The ladder is guessed from the movement's name on creation, and changed from a chip under the number in the logger | Adding an exercise happens mid-workout, so it must not ask a question. A wrong guess is noticed the first time a button produces an impossible weight, which is exactly when the chip is on screen. Migration `0009` backfills existing rows with the same rules the Swift guesser uses |
+
+### The target is the top set, not a weight for every set
+
+A routine line asked for one weight and then printed it against every set:
+"3 × 6-12 @ 160". On anything trained hard that is a lie for two sets out of
+three, because the second comes off by a plate a side and the third by
+another. The number on screen stopped meaning anything.
+
+| Decision | Rationale |
+|---|---|
+| `targetWeightKg` is reframed as the top set. No schema change | Asked what he actually aims at, the answer was the heaviest set and how many reps come off it. The sets under it are recorded, not prescribed, so there is nothing to author |
+| The logger prefills from last time's set *at the same number*, ahead of the set just logged | This is what makes a drop set free. After a top set of 160 the control offers 120 because that is what set two was last week. Copying the previous set forward meant dialling 40 kg back off by hand every time |
+| The personal best now appears on the exercise card, under "last time" | Under a top-set plan the best set is the thing being chased. The API had been sending it since the feature shipped and no view drew it |
+
+### Not done
+
+- No per-set authored plan. An earlier draft let a routine line hold an
+  ordered list of sets with a weight each. It is more faithful to how a heavy
+  session actually runs, and it is more to maintain than the top set is worth:
+  the drop weights are already recoverable from the last session.
+- Nothing recomputes existing targets onto their new ladder. They snap the
+  first time a button is pressed, which is enough.
+- The routine editor's weight field is still a text field, so it does not use
+  the ladder. Only the logger steps.

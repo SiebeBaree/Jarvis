@@ -6,21 +6,31 @@ public struct ExerciseCreateRequest: Encodable, Sendable {
     public var id: String?
     public var name: String
     public var muscleGroup: String?
-    public var equipment: String?
+    public var loadStyle: LoadStyle?
     public var isBodyweight: Bool?
 
     public init(
         id: String? = nil,
         name: String,
         muscleGroup: String? = nil,
-        equipment: String? = nil,
+        loadStyle: LoadStyle? = nil,
         isBodyweight: Bool? = nil,
     ) {
         self.id = id
         self.name = name
         self.muscleGroup = muscleGroup
-        self.equipment = equipment
+        self.loadStyle = loadStyle
         self.isBodyweight = isBodyweight
+    }
+}
+
+/// Changing one field on an exercise. Only `loadStyle` is patched from the
+/// app today; the server accepts the rest of the shape.
+public struct ExercisePatchRequest: Encodable, Sendable {
+    public var loadStyle: LoadStyle?
+
+    public init(loadStyle: LoadStyle? = nil) {
+        self.loadStyle = loadStyle
     }
 }
 

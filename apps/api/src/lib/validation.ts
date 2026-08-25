@@ -1,5 +1,6 @@
 // Zod schemas for Stage 1 request bodies and queries.
 import { z } from "zod";
+import { LOAD_STYLES } from "@/db/schema";
 import { isValidDayKey } from "./daykey";
 
 export const dayKeySchema = z
@@ -392,7 +393,7 @@ export const exerciseCreateSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(80),
   muscleGroup: z.string().max(40).nullish(),
-  equipment: z.string().max(40).nullish(),
+  loadStyle: z.enum(LOAD_STYLES).optional(),
   isBodyweight: z.boolean().optional(),
   notes: z.string().max(2000).nullish(),
 });
@@ -401,7 +402,7 @@ export const exercisePatchSchema = z
   .object({
     name: z.string().min(1).max(80).optional(),
     muscleGroup: z.string().max(40).nullable().optional(),
-    equipment: z.string().max(40).nullable().optional(),
+    loadStyle: z.enum(LOAD_STYLES).optional(),
     isBodyweight: z.boolean().optional(),
     notes: z.string().max(2000).nullable().optional(),
     archived: z.boolean().optional(),

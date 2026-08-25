@@ -11,7 +11,7 @@ import Testing
     {"id":"s2","routineId":"r1","title":"Chest & Back","dayKey":"2026-08-18",
      "startedAt":"2026-08-18T12:29:10.211Z","finishedAt":null,"notes":null,
      "exercises":[
-       {"exerciseId":"e1","name":"Bench press","muscleGroup":"Chest","equipment":"Barbell",
+       {"exerciseId":"e1","name":"Bench press","muscleGroup":"Chest","loadStyle":"plates",
         "isBodyweight":false,
         "target":{"sets":4,"repsLow":6,"repsHigh":8,"weightKg":80,"restSeconds":null,"notes":null},
         "sets":[{"id":"x1","exerciseId":"e1","setIndex":1,"weightKg":82.5,"reps":8,
@@ -22,7 +22,7 @@ import Testing
           {"id":"p2","exerciseId":"e1","setIndex":2,"weightKg":80,"reps":8,
            "isWarmup":false,"completedAt":"2026-08-11T12:29:08.396Z"}]},
         "best":{"weightKg":82.5,"reps":8,"dayKey":"2026-08-18"}},
-       {"exerciseId":"e2","name":"Pull-up","muscleGroup":"Back","equipment":null,
+       {"exerciseId":"e2","name":"Pull-up","muscleGroup":"Back","loadStyle":"plates",
         "isBodyweight":true,"target":null,"sets":[],"previous":null,"best":null}
      ],"setCount":1,"volumeKg":660}
     """
@@ -62,13 +62,13 @@ import Testing
         let json = """
         {"id":"r1","name":"Leg day","emoji":"🦵","colorHex":"#16A34A","notes":null,
          "sortOrder":0,"archived":false,"exercises":[
-          {"exerciseId":"e1","name":"Squat","muscleGroup":"Legs","equipment":"Barbell",
+          {"exerciseId":"e1","name":"Squat","muscleGroup":"Legs","loadStyle":"plates",
            "isBodyweight":false,"targetSets":5,"targetRepsLow":5,"targetRepsHigh":5,
            "targetWeightKg":100,"restSeconds":180,"notes":null,"sortOrder":0},
-          {"exerciseId":"e2","name":"Leg curl","muscleGroup":"Legs","equipment":"Machine",
+          {"exerciseId":"e2","name":"Leg curl","muscleGroup":"Legs","loadStyle":"machine",
            "isBodyweight":false,"targetSets":3,"targetRepsLow":10,"targetRepsHigh":15,
            "targetWeightKg":null,"restSeconds":null,"notes":null,"sortOrder":1},
-          {"exerciseId":"e3","name":"Plank","muscleGroup":"Core","equipment":null,
+          {"exerciseId":"e3","name":"Plank","muscleGroup":"Core","loadStyle":"plates",
            "isBodyweight":true,"targetSets":3,"targetRepsLow":null,"targetRepsHigh":null,
            "targetWeightKg":null,"restSeconds":null,"notes":null,"sortOrder":2}]}
         """
@@ -103,7 +103,7 @@ import Testing
 
     @Test func decodesProgressionPoints() throws {
         let json = """
-        {"exercise":{"id":"e1","name":"Bench press","muscleGroup":"Chest","equipment":"Barbell",
+        {"exercise":{"id":"e1","name":"Bench press","muscleGroup":"Chest","loadStyle":"plates",
           "isBodyweight":false,"notes":null,"archivedAt":null},
          "points":[
           {"sessionId":"s1","dayKey":"2026-08-11","topWeightKg":80,"topReps":8,

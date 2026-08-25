@@ -166,20 +166,24 @@ struct ExercisePickerView: View {
         }
     }
 
+    /// Muscle group when it is set, then how the weight goes up. The ladder
+    /// is worth showing here because it is a guess until you correct it.
     private func subtitle(_ exercise: ExerciseDTO) -> String? {
-        let parts = [exercise.muscleGroup, exercise.equipment].compactMap { $0 }
-        if parts.isEmpty { return exercise.isBodyweight ? "Bodyweight" : nil }
+        var parts = [exercise.muscleGroup].compactMap { $0 }
+        parts.append(exercise.isBodyweight ? "Bodyweight" : exercise.loadStyle.label)
         return parts.joined(separator: " · ")
     }
 
     private func create(_ name: String) {
         isCreating = true
         Task {
-            // Bodyweight is inferred from the name so the logger can hide the
-            // weight field without asking a question during a workout.
+            // Both of these are inferred from the name rather than asked for:
+            // adding an exercise happens mid-workout, and the logger lets you
+            // correct the ladder in one tap the moment it looks wrong.
             let created = await store.createExercise(
                 name: name,
                 muscleGroup: nil,
+                loadStyle: LoadStyle.guessed(fromName: name),
                 isBodyweight: Self.looksBodyweight(name),
             )
             isCreating = false

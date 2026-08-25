@@ -391,6 +391,10 @@ export const dailyScores = pgTable("daily_scores", {
 // Weights are kilograms throughout; the user lifts in kg and a unit column
 // nobody would ever change is a column that only creates conversion bugs.
 
+/** The weight ladders the logger can step through. */
+export const LOAD_STYLES = ["plates", "dumbbell", "cable", "machine", "free"] as const;
+export type LoadStyle = (typeof LOAD_STYLES)[number];
+
 export const exercises = pgTable("exercises", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -398,7 +402,11 @@ export const exercises = pgTable("exercises", {
     .references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   muscleGroup: text("muscle_group"), // "Chest", "Back", ... free text
-  equipment: text("equipment"), // "Barbell", "Dumbbell", "Machine", "Bodyweight"
+  // How this movement's weight goes up, which is a property of the equipment
+  // and not of the lifter: a cable stack moves in 5 lb plates (2.3, 4.5, 6.8
+  // kg as printed on the machine), dumbbells in 1 kg to 10 and 2 kg after,
+  // a barbell in 2.5 kg. Drives the logger's +/- buttons. See LOAD_STYLES.
+  loadStyle: text("load_style").notNull().default("plates").$type<LoadStyle>(),
   // Bodyweight exercises log reps with no weight, so the logger hides the
   // weight field instead of asking for a 0 nobody means.
   isBodyweight: boolean("is_bodyweight").notNull().default(false),

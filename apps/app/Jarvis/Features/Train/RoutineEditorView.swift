@@ -6,6 +6,12 @@ import SwiftUI
 /// actually trains. Nothing here is generated or suggested — the whole feature
 /// is that this list is theirs.
 ///
+/// The weight on a line is the *top set*, not a weight for every set. Asking
+/// for one number and then printing it against all three was a lie on any
+/// movement pushed hard, where the second set comes off by a plate a side and
+/// the third by another. The heaviest set is the one worth declaring; the
+/// rest are recorded from what actually happened.
+///
 /// Layout note: the exercise lines are a card with the numbers stacked under
 /// their captions, not a single inline row. Inline, "Sets × Reps to Reps @ kg"
 /// needs more width than a sheet has, so the captions wrapped mid-word and the
@@ -170,7 +176,7 @@ struct RoutineEditorView: View {
             }
             .buttonStyle(.jarvisSecondary)
 
-            Text("Targets are a reminder, not a rule. During a workout you also see what you actually lifted last time.")
+            Text("The weight is your top set, the heaviest one you are going for. Sets after it come off as much as they need to, and the logger fills each one from what you did at that set number last time.")
                 .font(.captionJ)
                 .foregroundStyle(Color.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -205,7 +211,7 @@ struct RoutineEditorView: View {
                 CaptionedField(caption: "to", prompt: "12", text: line.repsHigh, width: 48)
                 Spacer(minLength: 0)
                 CaptionedField(
-                    caption: line.wrappedValue.isBodyweight ? "Added" : "Weight",
+                    caption: line.wrappedValue.isBodyweight ? "Top added" : "Top set",
                     prompt: "0",
                     text: line.weight,
                     width: 66,
