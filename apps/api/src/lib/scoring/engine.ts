@@ -173,107 +173,34 @@ export function computeDailyScore(input: DailyScoreInput): DailyScoreResult {
   };
 }
 
-// ---------- streaks ----------
-
-export interface StreakResult {
-  current: number;
-  best: number;
-}
-
-/**
- * Daily/multi-daily streak: consecutive days at FULL completion (credit 1.0 —
- * partial days break it; the streak is the "hard" metric, the score is the
- * forgiving one). An incomplete *today* does not break the streak until the
- * day boundary passes: current counts back from today if today qualifies,
- * else from yesterday.
- */
-export function dailyStreak(
-  qualifyingDayKeys: ReadonlySet<string>,
-  todayKey: string,
-  addDaysFn: (dayKey: string, days: number) => string,
-): StreakResult {
-  const countBackFrom = (start: string): number => {
-    let n = 0;
-    let day = start;
-    while (qualifyingDayKeys.has(day)) {
-      n++;
-      day = addDaysFn(day, -1);
-    }
-    return n;
-  };
-
-  const current = qualifyingDayKeys.has(todayKey)
-    ? countBackFrom(todayKey)
-    : countBackFrom(addDaysFn(todayKey, -1));
-
-  // Best: scan all runs.
-  let best = current;
-  for (const day of qualifyingDayKeys) {
-    if (qualifyingDayKeys.has(addDaysFn(day, 1))) continue; // not the end of a run
-    best = Math.max(best, countBackFrom(day));
-  }
-  return { current, best };
-}
-
-/**
- * Weekly-habit streak: consecutive weeks hitting the target, counted in weeks.
- * The in-progress week neither extends nor breaks the streak — unless it has
- * already hit the target, in which case it extends immediately.
- */
-export function weeklyStreak(
-  qualifyingWeekStarts: ReadonlySet<string>,
-  currentWeekStart: string,
-  addDaysFn: (dayKey: string, days: number) => string,
-): StreakResult {
-  const countBackFrom = (start: string): number => {
-    let n = 0;
-    let week = start;
-    while (qualifyingWeekStarts.has(week)) {
-      n++;
-      week = addDaysFn(week, -7);
-    }
-    return n;
-  };
-
-  const current = qualifyingWeekStarts.has(currentWeekStart)
-    ? countBackFrom(currentWeekStart)
-    : countBackFrom(addDaysFn(currentWeekStart, -7));
-
-  let best = current;
-  for (const week of qualifyingWeekStarts) {
-    if (qualifyingWeekStarts.has(addDaysFn(week, 7))) continue;
-    best = Math.max(best, countBackFrom(week));
-  }
-  return { current, best };
-}
-
 // ---------- pace display (UI status chip, not scoring) ----------
 
 export type PaceStatus =
   | { kind: "week_done" }
-  | { kind: "on_pace" }
-  | { kind: "behind"; by: number }
-  | { kind: "out_of_reach" };
+  | { kind: "on_track"; remaining: number; daysLeft: number }
+  | { kind: "last_chance"; remaining: number; daysLeft: number }
+  | { kind: "out_of_reach"; remaining: number; daysLeft: number };
 
 /**
- * Friendlier display rule than the scoring formula: on-pace iff
- * done >= ceil(target × elapsedFullDays / 7), where today only counts as
- * elapsed from 18:00 — the app never calls you "behind" at 7 AM.
+ * The same reachability rule the scoring formula uses, so the chip and the
+ * score never disagree. A weekly habit is only in trouble once the target
+ * stops being reachable in the days that are left, which is why there is no
+ * "behind" state: missing Tuesday on a 5x week leaves 4 to do in 5 days, and
+ * that is on track, not a shortfall.
+ *
+ * Today always counts as a day you can still act on, so there is no hour rule.
  */
 export function paceStatus(args: {
   targetReps: number;
   weekTotal: number;
   elapsedDayOfWeek: number; // Mon=1 .. Sun=7 (today)
-  hourOfDay: number; // 0-23, user-local
 }): PaceStatus {
   const target = Math.max(1, args.targetReps);
-  if (args.weekTotal >= target) return { kind: "week_done" };
+  const remaining = target - args.weekTotal;
+  if (remaining <= 0) return { kind: "week_done" };
 
-  const remainingDays = 7 - args.elapsedDayOfWeek + (args.hourOfDay < 18 ? 1 : 0);
-  if (target - args.weekTotal > remainingDays) return { kind: "out_of_reach" };
-
-  const elapsedFullDays = args.hourOfDay >= 18 ? args.elapsedDayOfWeek : args.elapsedDayOfWeek - 1;
-  const expected = Math.ceil((target * elapsedFullDays) / 7);
-  if (args.weekTotal >= expected) return { kind: "on_pace" };
-  return { kind: "behind", by: expected - args.weekTotal };
+  const daysLeft = Math.max(0, 8 - args.elapsedDayOfWeek); // today included
+  if (remaining > daysLeft) return { kind: "out_of_reach", remaining, daysLeft };
+  if (remaining === daysLeft) return { kind: "last_chance", remaining, daysLeft };
+  return { kind: "on_track", remaining, daysLeft };
 }

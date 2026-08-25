@@ -28,7 +28,7 @@ export function todayKey(settings: SettingsRow, now = new Date()): DayKey {
   return dayKeyFor(now, settings.timezone, settings.dayBoundaryHour);
 }
 
-/** Hour of day (0-23) in the user's timezone — for the pace display rule. */
+/** Hour of day (0-23) in the user's timezone. Used by the notification cron. */
 export function localHour(settings: SettingsRow, now = new Date()): number {
   return Number(
     new Intl.DateTimeFormat("en-GB", {

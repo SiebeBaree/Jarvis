@@ -10,7 +10,6 @@ const base: CheckinNudgeData = {
   yesterdayMood: 55,
   openTasksToday: 0,
   overdueTasks: 0,
-  bestActiveStreak: null,
   hasAnyMoodEntry: true,
 };
 
@@ -34,11 +33,6 @@ describe("nudge category ladder", () => {
     expect(category({ overdueTasks: 0 })).not.toBe("overdue");
   });
 
-  it("mentions a streak from three days", () => {
-    expect(category({ bestActiveStreak: { habitName: "Gym", days: 3 } })).toBe("streak");
-    expect(category({ bestActiveStreak: { habitName: "Gym", days: 2 } })).not.toBe("streak");
-  });
-
   it("calls a day busy from four open tasks", () => {
     expect(category({ openTasksToday: 4 })).toBe("busy_day");
     expect(category({ openTasksToday: 3 })).not.toBe("busy_day");
@@ -54,10 +48,8 @@ describe("nudge category ladder", () => {
     expect(category({ yesterdayMood: null })).toBe("generic");
   });
 
-  it("prefers a bad day over overdue tasks and streaks", () => {
-    expect(
-      category({ yesterdayMood: 20, overdueTasks: 5, bestActiveStreak: { habitName: "Gym", days: 9 } }),
-    ).toBe("yesterday_bad");
+  it("prefers a bad day over overdue tasks", () => {
+    expect(category({ yesterdayMood: 20, overdueTasks: 5, openTasksToday: 6 })).toBe("yesterday_bad");
   });
 });
 
@@ -77,15 +69,9 @@ describe("nudge text", () => {
     expect(bodies.size).toBeGreaterThan(1);
   });
 
-  it("interpolates the counts and the habit name it talks about", () => {
-    const overdue = composeCheckinNudge({ ...base, overdueTasks: 3 });
-    expect(overdue.body).toContain("3");
-    const streak = composeCheckinNudge({
-      ...base,
-      bestActiveStreak: { habitName: "Morning run", days: 12 },
-    });
-    expect(streak.body).toContain("Morning run");
-    expect(streak.body).toContain("12");
+  it("interpolates the counts it talks about", () => {
+    expect(composeCheckinNudge({ ...base, overdueTasks: 3 }).body).toContain("3");
+    expect(composeCheckinNudge({ ...base, openTasksToday: 5 }).body).toContain("5");
   });
 
   it("reads correctly for a single task", () => {

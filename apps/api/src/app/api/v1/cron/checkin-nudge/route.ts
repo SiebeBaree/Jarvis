@@ -91,7 +91,7 @@ async function nudgeUser(
     return { userId, result: "already_sent_today" };
   }
 
-  const data = await gatherNudgeData(userId, settings, dayKey);
+  const data = await gatherNudgeData(userId, dayKey);
   const nudge = composeCheckinNudge(data);
 
   let delivered = 0;

@@ -4,7 +4,7 @@ import JarvisAPI
 import Observation
 
 /// Feature store for the Habits list: habits + areas + the Today payload
-/// (per-habit reps/pace), plus a lazy per-habit stats cache for streak chips.
+/// (per-habit reps/pace).
 @Observable
 @MainActor
 final class HabitsStore {
@@ -22,12 +22,6 @@ final class HabitsStore {
     }
 
     private(set) var content: LoadState<Content> = .idle
-    /// Lazily loaded stats per habit id (streak chips). Missing = not loaded.
-    private(set) var stats: [String: HabitStatsResponse] = [:]
-    /// Habits whose stats a mutation has outdated. The stale value stays on
-    /// screen until the replacement lands — blanking it first made the streak
-    /// chip blink out and back on every tap.
-    private var staleStats: Set<String> = []
     var mutationError: String?
 
     private var model: AppModel?
@@ -40,7 +34,6 @@ final class HabitsStore {
         guard let model else { return }
         if !force, let cached = model.store.read(Content.self, .habits) {
             content = .loaded(cached.value)
-            loadStats(for: cached.value.habits)
             if cached.isFresh { return }
         }
         if content.value == nil { content = .loading }
@@ -63,7 +56,6 @@ final class HabitsStore {
             )
             content = .loaded(loaded)
             model.store.write(loaded, .habits)
-            loadStats(for: loaded.habits)
         } catch {
             model.handle(error)
             if content.value == nil {
@@ -71,33 +63,6 @@ final class HabitsStore {
             } else {
                 mutationError = TodayStore.message(for: error)
             }
-        }
-    }
-
-    /// Fires concurrent stats fetches for habits that have none yet or whose
-    /// stats a mutation has outdated.
-    private func loadStats(for habits: [HabitDTO]) {
-        guard let model else { return }
-        for habit in habits where stats[habit.id] == nil || staleStats.contains(habit.id) {
-            let id = habit.id
-            Task {
-                let ticket = model.writeTicket
-                if let response = try? await model.api.habitStats(id: id),
-                   !model.hasWritten(since: ticket) {
-                    stats[id] = response
-                    staleStats.remove(id)
-                }
-            }
-        }
-    }
-
-    /// Marks stats as needing a refresh on the next load, without dropping
-    /// what is currently on screen.
-    func invalidateStats(for habitId: String? = nil) {
-        if let habitId {
-            staleStats.insert(habitId)
-        } else {
-            staleStats.formUnion(stats.keys)
         }
     }
 
@@ -139,11 +104,11 @@ final class HabitsStore {
 
     /// Header strip numbers: habits on pace vs all active habits with a
     /// Today entry (weekly on pace/done, daily/multi at full credit today).
-    var paceSummary: (onPace: Int, total: Int, flags: [Bool]) {
+    var paceSummary: (onTrack: Int, total: Int, flags: [Bool]) {
         guard let today = content.value?.today else { return (0, 0, []) }
         let activeIds = Set(activeHabits.map(\.id))
         let entries = today.habits.filter { activeIds.contains($0.habit.id) }
-        let flags = entries.map { HabitDisplay.isOnPace($0) }
+        let flags = entries.map { HabitDisplay.isOnTrack($0) }
         return (flags.filter { $0 }.count, flags.count, flags)
     }
 
@@ -177,7 +142,6 @@ final class HabitsStore {
             }
             apply(loaded)
         }
-        invalidateStats(for: habitId)
         model.mutate(
             delta > 0 ? "POST" : "DELETE",
             "/habits/\(habitId)/log",

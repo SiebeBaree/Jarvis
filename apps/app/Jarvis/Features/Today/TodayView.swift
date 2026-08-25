@@ -19,7 +19,8 @@ struct TodayView: View {
     @State private var selectedDay: DayKey?
     @State private var showBreakdown = false
     /// Tapping a habit on Today opens its detail. It used to do nothing here,
-    /// so seeing a streak meant leaving for the Habits tab and finding it again.
+    /// so seeing a habit's history meant leaving for the Habits tab and
+    /// finding it again.
     @State private var habitRoute: HabitDetailRoute?
     /// Quick-add composer state (today's page only).
     @State private var composerActive = false

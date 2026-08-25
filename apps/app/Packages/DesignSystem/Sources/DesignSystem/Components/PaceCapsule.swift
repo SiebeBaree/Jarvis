@@ -2,38 +2,50 @@ import SwiftUI
 
 // MARK: - Weekly habit pace indicator
 //
-// n segments (the weekly target) filling left-to-right in the habit's colour,
-// with a thin tick at "where you should be by tonight". Status reads On pace ·
-// N behind · Week done · Out of reach.
+// n segments (the weekly target) filling left-to-right in the habit's colour.
 //
-// NEVER red. Missing a planned day is not a failure in this app — only the
-// weekly total counts, and the whole point of the indicator is to say "you can
-// still make it", not "you blew it".
+// The indicator stays silent while the week is still winnable. It used to
+// compare you against a straight line through the week, which made a habit you
+// do once on Sunday "1 behind" from Tuesday morning, and a gym week that skips
+// Tuesday "1 behind" on a Wednesday you had every intention of training. Both
+// were arithmetic, not information.
+//
+// So there are only two things worth saying: the day the last rep has to land,
+// and the day the week can no longer be saved. Everything else is a count.
+//
+// NEVER red. Missing a day is not a failure in this app: only the weekly total
+// counts, and every rep still counts toward it after the week is out of reach.
 
 public enum PaceDisplayStatus: Equatable, Sendable {
-    case onPace
-    case behind(Int)
+    /// The target is still reachable with a day to spare.
+    case onTrack
+    /// Every remaining day now has to count, today included.
+    case lastChance(daysLeft: Int)
+    /// More reps left than days left. Nothing to do but keep logging.
+    case outOfReach(daysLeft: Int)
     case weekDone
-    case outOfReach
 }
 
 public struct PaceCapsule: View {
     private let target: Int
     private let done: Int
-    private let expectedByTonight: Double
+    private let mustHaveByTonight: Double
     private let status: PaceDisplayStatus
     private let tint: Color
 
+    /// - Parameter mustHaveByTonight: reps that have to be logged by the end
+    ///   of today for a full week to still be reachable. Zero for most of the
+    ///   week, which is why the tick is usually hidden.
     public init(
         target: Int,
         done: Int,
-        expectedByTonight: Double,
+        mustHaveByTonight: Double,
         status: PaceDisplayStatus,
         tint: Color = .success
     ) {
         self.target = max(target, 1)
         self.done = min(max(done, 0), max(target, 1))
-        self.expectedByTonight = min(max(expectedByTonight, 0), Double(max(target, 1)))
+        self.mustHaveByTonight = min(max(mustHaveByTonight, 0), Double(max(target, 1)))
         self.status = status
         self.tint = tint
     }
@@ -41,16 +53,19 @@ public struct PaceCapsule: View {
     private let segmentHeight: CGFloat = 6
     private let segmentSpacing: CGFloat = 3
 
+    private var isOutOfReach: Bool {
+        if case .outOfReach = status { return true }
+        return false
+    }
+
     private func segmentColor(at index: Int) -> Color {
         if index < done { return tint }
-        if case .behind = status, Double(index) < expectedByTonight {
-            return .warning.opacity(0.28)
-        }
+        if isOutOfReach, Double(index) < mustHaveByTonight { return .warning.opacity(0.28) }
         return .bgSubtle
     }
 
     private var showsTick: Bool {
-        status != .weekDone && expectedByTonight > 0 && expectedByTonight < Double(target)
+        status != .weekDone && mustHaveByTonight > 0 && mustHaveByTonight < Double(target)
     }
 
     public var body: some View {
@@ -76,7 +91,7 @@ public struct PaceCapsule: View {
                         .fill(Color.textTertiary)
                         .frame(width: 2, height: segmentHeight + 5)
                         .position(
-                            x: proxy.size.width * expectedByTonight / Double(target),
+                            x: proxy.size.width * mustHaveByTonight / Double(target),
                             y: proxy.size.height / 2
                         )
                 }
@@ -86,6 +101,10 @@ public struct PaceCapsule: View {
         .accessibilityLabel(Text("\(done) of \(target) this week"))
     }
 
+    private static func daysLabel(_ days: Int) -> String {
+        days == 1 ? "1 day left" : "\(days) days left"
+    }
+
     @ViewBuilder
     private var statusLine: some View {
         HStack(spacing: Space.xs) {
@@ -93,28 +112,36 @@ public struct PaceCapsule: View {
                 .font(.microJ)
                 .monospacedDigit()
                 .foregroundStyle(Color.textSecondary)
-            Text("·").font(.microJ).foregroundStyle(Color.textTertiary)
             switch status {
-            case .onPace:
-                Text("On pace").font(.microJ).foregroundStyle(tint)
-            case .behind(let n):
-                Text("\(n) behind").font(.microJ).foregroundStyle(Color.warning)
+            case .onTrack:
+                // No verdict. There is nothing to report about a week that is
+                // going to be fine either way.
+                Text("this week").font(.microJ).foregroundStyle(Color.textTertiary)
+            case .lastChance(let days):
+                separator
+                Text(Self.daysLabel(days)).font(.microJ).foregroundStyle(Color.warning)
+            case .outOfReach(let days):
+                separator
+                Text(Self.daysLabel(days)).font(.microJ).foregroundStyle(Color.textTertiary)
             case .weekDone:
+                separator
                 Text("Week done").font(.microJ).foregroundStyle(tint)
-            case .outOfReach:
-                Text("Out of reach").font(.microJ).foregroundStyle(Color.textTertiary)
             }
         }
+    }
+
+    private var separator: some View {
+        Text("·").font(.microJ).foregroundStyle(Color.textTertiary)
     }
 }
 
 #Preview("PaceCapsule") {
     VStack(alignment: .leading, spacing: Space.xl) {
-        PaceCapsule(target: 5, done: 3, expectedByTonight: 2.9, status: .onPace, tint: ItemColor.green.color)
-        PaceCapsule(target: 5, done: 1, expectedByTonight: 3, status: .behind(2), tint: ItemColor.blue.color)
-        PaceCapsule(target: 5, done: 5, expectedByTonight: 4, status: .weekDone, tint: ItemColor.violet.color)
-        PaceCapsule(target: 6, done: 1, expectedByTonight: 5, status: .outOfReach)
-        PaceCapsule(target: 3, done: 2, expectedByTonight: 1.7, status: .onPace, tint: ItemColor.orange.color)
+        PaceCapsule(target: 5, done: 1, mustHaveByTonight: 0, status: .onTrack, tint: ItemColor.green.color)
+        PaceCapsule(target: 5, done: 3, mustHaveByTonight: 3, status: .lastChance(daysLeft: 2), tint: ItemColor.blue.color)
+        PaceCapsule(target: 5, done: 5, mustHaveByTonight: 4, status: .weekDone, tint: ItemColor.violet.color)
+        PaceCapsule(target: 5, done: 1, mustHaveByTonight: 3, status: .outOfReach(daysLeft: 2))
+        PaceCapsule(target: 1, done: 0, mustHaveByTonight: 1, status: .lastChance(daysLeft: 1), tint: ItemColor.orange.color)
     }
     .padding()
     .frame(width: 240)

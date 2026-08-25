@@ -9,8 +9,8 @@ struct HabitDetailRoute: Hashable, Identifiable {
 }
 
 /// Shared display logic for habits (pace mapping, captions, week math).
-/// Mirrors the server's display rule (§A8): elapsed excludes today before
-/// 18:00 so the app never calls you "behind" at 7 AM.
+/// Mirrors the server's weekly rule: a habit is only in trouble once its
+/// target stops being reachable in the days that are left.
 enum HabitDisplay {
     static func icon(for habit: HabitDTO) -> String {
         let name = habit.icon?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -40,9 +40,9 @@ enum HabitDisplay {
     static func paceStatus(_ pace: PaceDTO?) -> PaceDisplayStatus {
         switch pace?.kind {
         case "week_done": .weekDone
-        case "behind": .behind(max(pace?.by ?? 1, 1))
-        case "out_of_reach": .outOfReach
-        default: .onPace
+        case "last_chance": .lastChance(daysLeft: max(pace?.daysLeft ?? 1, 1))
+        case "out_of_reach": .outOfReach(daysLeft: max(pace?.daysLeft ?? 1, 1))
+        default: .onTrack
         }
     }
 
@@ -59,36 +59,36 @@ enum HabitDisplay {
         DayKeyMath.addDays(dayKey, -(weekdayIndex(of: dayKey) - 1))
     }
 
-    /// Elapsed full days of the week (0…7). Today only counts after 18:00
-    /// (late-night hours before the 3 AM boundary count as "tonight").
-    static func elapsedDays(dayKey: String, now: Date = .now) -> Int {
-        let index = weekdayIndex(of: dayKey)
-        let hour = Calendar.current.component(.hour, from: now)
-        let todayCounts = hour >= 18 || DayKeyMath.isLateNight(now: now)
-        return todayCounts ? index : max(index - 1, 0)
+    /// Days left in the week, today included.
+    static func daysLeft(from dayKey: String) -> Int {
+        max(0, 8 - weekdayIndex(of: dayKey))
     }
 
-    /// Where the pace tick sits: target × elapsed / 7.
-    static func expectedByTonight(target: Int, dayKey: String, now: Date = .now) -> Double {
-        Double(target) * Double(elapsedDays(dayKey: dayKey, now: now)) / 7
+    /// Reps that have to be logged by the end of today for a full week to
+    /// still be reachable. Zero for most of the week, which is exactly why
+    /// the pace tick is usually hidden.
+    static func mustHaveByTonight(target: Int, dayKey: String) -> Double {
+        Double(max(0, target - (daysLeft(from: dayKey) - 1)))
     }
 
     /// Client-side pace status for contexts without a server PaceDTO
-    /// (Habit Detail). Same display rule as the server.
-    static func weeklyStatus(total: Int, target: Int, dayKey: String, now: Date = .now) -> PaceDisplayStatus {
-        if total >= target { return .weekDone }
-        let remainingDays = 7 - weekdayIndex(of: dayKey) + 1 // including today
-        if total + remainingDays < target { return .outOfReach }
-        let needed = Int(ceil(expectedByTonight(target: target, dayKey: dayKey, now: now)))
-        return total >= needed ? .onPace : .behind(needed - total)
+    /// (Habit Detail). Same rule as the server.
+    static func weeklyStatus(total: Int, target: Int, dayKey: String) -> PaceDisplayStatus {
+        let remaining = max(1, target) - total
+        if remaining <= 0 { return .weekDone }
+        let days = daysLeft(from: dayKey)
+        if remaining > days { return .outOfReach(daysLeft: days) }
+        if remaining == days { return .lastChance(daysLeft: days) }
+        return .onTrack
     }
 
-    /// Whether an entry counts as "on pace" for the Habits header strip:
-    /// weekly habits on pace or done, daily/multi habits at full credit today.
-    static func isOnPace(_ entry: HabitTodayEntryDTO) -> Bool {
+    /// Whether an entry counts as "on track" for the Habits header strip:
+    /// weekly habits whose week is still winnable, daily and multi habits at
+    /// full credit today.
+    static func isOnTrack(_ entry: HabitTodayEntryDTO) -> Bool {
         switch entry.habit.type {
         case .weeklyFrequency:
-            entry.pace?.kind == "on_pace" || entry.pace?.kind == "week_done"
+            entry.pace?.kind != "out_of_reach"
         case .daily, .multiDaily:
             entry.repsToday >= entry.habit.targetReps
         }

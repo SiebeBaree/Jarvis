@@ -11,7 +11,7 @@ public extension Font {
     /// 44 pt semibold rounded, monospaced digits — the daily score.
     static let displayScore = Font.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit()
 
-    /// 29 pt semibold rounded — big stat numbers (streaks, totals).
+    /// 29 pt semibold rounded — big stat numbers (rates, totals).
     static let displayStat = Font.system(size: 29, weight: .semibold, design: .rounded).monospacedDigit()
 
     /// 26 pt semibold rounded — page titles.

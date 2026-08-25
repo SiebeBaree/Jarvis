@@ -12,7 +12,6 @@ import { paceStatus, type PaceStatus, type TaskForScoring } from "./scoring/engi
 import {
   applicableHabits,
   finalizeThrough,
-  localHour,
   recomputeDay,
   repCounts,
   todayKey,
@@ -199,7 +198,6 @@ export async function buildDayPayload(
     dueTasks: dueForScoring,
   });
 
-  const hour = localHour(settings, now);
   const creditByHabit = new Map(snapshot.breakdown.habits.map((h) => [h.habitId, h.credit]));
 
   const recentWindow = Array.from({ length: 7 }, (_, i) => addDays(dayKey, i - 6));
@@ -230,7 +228,6 @@ export async function buildDayPayload(
               targetReps: habit.targetReps,
               weekTotal,
               elapsedDayOfWeek: isoDay,
-              hourOfDay: hour,
             })
           : null,
       plannedToday: habit.type !== "weekly_frequency" || habit.plannedDays.length === 0

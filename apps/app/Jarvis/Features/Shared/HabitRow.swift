@@ -19,10 +19,6 @@ struct HabitRow: View {
     /// Weekly habits that are not planned today sit in a quieter group.
     var isMuted: Bool = false
     var showsPace: Bool = true
-    /// Current streak, when the caller has stats loaded. Today's payload does
-    /// not carry one, so the row simply omits it there rather than firing a
-    /// per-habit stats request to decorate a caption.
-    var streak: StreakDTO? = nil
     var onLog: () -> Void
     var onUnlog: () -> Void
     var onOpen: (() -> Void)?
@@ -76,7 +72,7 @@ struct HabitRow: View {
             PaceCapsule(
                 target: habit.targetReps,
                 done: entry.weekTotal,
-                expectedByTonight: HabitDisplay.expectedByTonight(
+                mustHaveByTonight: HabitDisplay.mustHaveByTonight(
                     target: habit.targetReps,
                     dayKey: dayKey,
                 ),
@@ -85,14 +81,9 @@ struct HabitRow: View {
             )
             .frame(maxWidth: 170, alignment: .leading)
         } else {
-            HStack(spacing: Space.sm) {
-                Text(HabitDisplay.typeCaption(for: habit))
-                    .font(.subheadJ)
-                    .foregroundStyle(Color.textTertiary)
-                if let streak {
-                    StreakChip(count: streak.current, unit: streak.unit, compact: true)
-                }
-            }
+            Text(HabitDisplay.typeCaption(for: habit))
+                .font(.subheadJ)
+                .foregroundStyle(Color.textTertiary)
         }
     }
 

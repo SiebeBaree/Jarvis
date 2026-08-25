@@ -42,14 +42,10 @@ struct HabitsView: View {
             )
         }
         .sheet(item: $editorDraft) { draft in
-            HabitEditorView(mode: .create(draft), store: store) {
-                store.invalidateStats()
-            }
+            HabitEditorView(mode: .create(draft), store: store)
         }
         .sheet(item: $editingHabit) { habit in
-            HabitEditorView(mode: .edit(habit), store: store) {
-                store.invalidateStats(for: habit.id)
-            }
+            HabitEditorView(mode: .edit(habit), store: store)
         }
         .confirmationDialog(
             "Archive habit?",
@@ -171,14 +167,14 @@ struct HabitsView: View {
             Text("This week")
                 .font(.subheadStrongJ)
                 .foregroundStyle(Color.textSecondary)
-            Text("\(summary.onPace) of \(summary.total) on pace")
+            Text("\(summary.onTrack) of \(summary.total) on track")
                 .font(.subheadJ)
                 .foregroundStyle(Color.textTertiary)
             Spacer(minLength: Space.sm)
             HStack(spacing: 3) {
-                ForEach(Array(summary.flags.enumerated()), id: \.offset) { _, onPace in
+                ForEach(Array(summary.flags.enumerated()), id: \.offset) { _, onTrack in
                     Capsule()
-                        .fill(onPace ? Color.success : Color.bgSubtle)
+                        .fill(onTrack ? Color.success : Color.bgSubtle)
                         .frame(width: 12, height: 4)
                 }
             }
@@ -198,7 +194,6 @@ struct HabitsView: View {
                 HabitRow(
                     entry: entry,
                     dayKey: store.content.value?.today.dayKey ?? DayKeyMath.todayKey(),
-                    streak: store.stats[habit.id]?.streak,
                     onLog: { store.logHabit(habit.id) },
                     onUnlog: { store.unlogHabit(habit.id) },
                     onOpen: { detailRoute = HabitDetailRoute(habitId: habit.id) },

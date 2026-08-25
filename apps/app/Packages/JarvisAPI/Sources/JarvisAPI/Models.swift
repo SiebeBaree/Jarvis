@@ -180,8 +180,10 @@ public struct HabitListResponse: Codable, Sendable {
 }
 
 public struct PaceDTO: Codable, Sendable, Equatable {
-    public let kind: String // week_done | on_pace | behind | out_of_reach
-    public let by: Int?
+    public let kind: String // week_done | on_track | last_chance | out_of_reach
+    /// Reps still needed, and days left including today. Absent on week_done.
+    public let remaining: Int?
+    public let daysLeft: Int?
 }
 
 /// One day of the trailing-7-day backfill strip.
@@ -238,12 +240,6 @@ public struct HabitCalendarResponse: Codable, Sendable {
     public let weeks: [CalendarWeekDTO]?
 }
 
-public struct StreakDTO: Codable, Sendable, Equatable {
-    public let current: Int
-    public let best: Int
-    public let unit: String // days | weeks
-}
-
 public struct CurrentWeekDTO: Codable, Sendable, Equatable {
     public let total: Int
     public let target: Int
@@ -251,7 +247,6 @@ public struct CurrentWeekDTO: Codable, Sendable, Equatable {
 
 public struct HabitStatsResponse: Codable, Sendable {
     public let type: HabitType
-    public let streak: StreakDTO
     // Values are nullable server-side (insufficient history → null).
     public let rates: [String: Double?]
     public let totalReps: Int

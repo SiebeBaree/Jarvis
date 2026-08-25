@@ -18,7 +18,6 @@ describe.skipIf(!enabled)("notifications · real-database integration", () => {
   let drizzle: typeof import("drizzle-orm");
 
   let userId: string;
-  let settings: import("../../src/lib/auth").SettingsRow;
 
   // A date far enough back that no real entry can collide with it.
   const testDayKey = "2001-01-08";
@@ -33,12 +32,6 @@ describe.skipIf(!enabled)("notifications · real-database integration", () => {
     const user = await db.query.users.findFirst();
     if (!user) throw new Error("No user in the database — register first");
     userId = user.id;
-
-    const settingsRow = await db.query.settings.findFirst({
-      where: drizzle.eq(schema.settings.userId, userId),
-    });
-    if (!settingsRow) throw new Error("No settings row");
-    settings = settingsRow;
   });
 
   afterAll(async () => {
@@ -58,7 +51,7 @@ describe.skipIf(!enabled)("notifications · real-database integration", () => {
   });
 
   it("gathers nudge data without error and returns sane shapes", async () => {
-    const result = await data.gatherNudgeData(userId, settings, testDayKey);
+    const result = await data.gatherNudgeData(userId, testDayKey);
 
     expect(result.dayKey).toBe(testDayKey);
     expect(typeof result.hasAnyMoodEntry).toBe("boolean");
@@ -68,10 +61,6 @@ describe.skipIf(!enabled)("notifications · real-database integration", () => {
     // Every open task with a due date is in the past relative to 2001, so the
     // overdue count is the only one that can be non-zero for this dayKey.
     expect(result.openTasksToday).toBe(0);
-    if (result.bestActiveStreak !== null) {
-      expect(result.bestActiveStreak.days).toBeGreaterThan(0);
-      expect(result.bestActiveStreak.habitName.length).toBeGreaterThan(0);
-    }
   });
 
   it("reports no mood on a day that was never logged", async () => {

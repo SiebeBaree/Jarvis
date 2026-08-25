@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addDays } from "../src/lib/daykey";
 import {
   computeDailyScore,
-  dailyStreak,
   feelRaw,
   habitComponentRaw,
   habitCredit,
   paceStatus,
   taskComponent,
   taskCredit,
-  weeklyStreak,
   type TaskForScoring,
 } from "../src/lib/scoring/engine";
 
@@ -241,62 +238,69 @@ describe("computeDailyScore", () => {
   });
 });
 
-describe("streaks", () => {
-  it("daily: incomplete today does not break the streak", () => {
-    const qualifying = new Set(["2026-07-07", "2026-07-08", "2026-07-09"]);
-    expect(dailyStreak(qualifying, "2026-07-10", addDays).current).toBe(3);
-  });
-
-  it("daily: today completing extends the streak", () => {
-    const qualifying = new Set(["2026-07-08", "2026-07-09", "2026-07-10"]);
-    expect(dailyStreak(qualifying, "2026-07-10", addDays).current).toBe(3);
-  });
-
-  it("daily: a gap resets current but best remembers", () => {
-    const qualifying = new Set([
-      "2026-07-01",
-      "2026-07-02",
-      "2026-07-03",
-      "2026-07-04",
-      // gap on 07-05
-      "2026-07-09",
-    ]);
-    const r = dailyStreak(qualifying, "2026-07-10", addDays);
-    expect(r.current).toBe(1);
-    expect(r.best).toBe(4);
-  });
-
-  it("weekly: in-progress week ignored unless already met", () => {
-    const qualifying = new Set(["2026-06-22", "2026-06-29"]); // two completed weeks
-    // Current week (2026-07-06) not yet qualifying → streak counts back from last week.
-    expect(weeklyStreak(qualifying, "2026-07-06", addDays).current).toBe(2);
-    // Current week already met → extends immediately.
-    const withCurrent = new Set([...qualifying, "2026-07-06"]);
-    expect(weeklyStreak(withCurrent, "2026-07-06", addDays).current).toBe(3);
-  });
-});
-
 describe("paceStatus (display rule)", () => {
-  it("never calls you behind early in the morning", () => {
-    // Wednesday 7 AM, gym 5x/week, 2 of 5 done.
-    // Elapsed full days = 2 (Mon, Tue) → expected = ceil(10/7) = 2 → on pace.
-    const morning = paceStatus({ targetReps: 5, weekTotal: 2, elapsedDayOfWeek: 3, hourOfDay: 7 });
-    expect(morning).toEqual({ kind: "on_pace" });
+  it("stays on track while the target is still reachable", () => {
+    // Gym 5x/week. Tuesday skipped, so Wednesday has 1 done and 5 days left.
+    expect(paceStatus({ targetReps: 5, weekTotal: 1, elapsedDayOfWeek: 3 })).toEqual({
+      kind: "on_track",
+      remaining: 4,
+      daysLeft: 5,
+    });
   });
 
-  it("counts today as elapsed from 18:00", () => {
-    // Wednesday 19:00: expected = ceil(15/7) = 3 → 2 done = behind by 1.
-    const evening = paceStatus({ targetReps: 5, weekTotal: 2, elapsedDayOfWeek: 3, hourOfDay: 19 });
-    expect(evening).toEqual({ kind: "behind", by: 1 });
+  it("does not call a once-a-week habit late on Tuesday", () => {
+    expect(paceStatus({ targetReps: 1, weekTotal: 0, elapsedDayOfWeek: 2 })).toEqual({
+      kind: "on_track",
+      remaining: 1,
+      daysLeft: 6,
+    });
+  });
+
+  it("flags the last chance when every remaining day is needed", () => {
+    // Saturday, 3 of 5 done: Saturday and Sunday both have to count.
+    expect(paceStatus({ targetReps: 5, weekTotal: 3, elapsedDayOfWeek: 6 })).toEqual({
+      kind: "last_chance",
+      remaining: 2,
+      daysLeft: 2,
+    });
+    // Sunday of a once-a-week habit: today or never.
+    expect(paceStatus({ targetReps: 1, weekTotal: 0, elapsedDayOfWeek: 7 })).toEqual({
+      kind: "last_chance",
+      remaining: 1,
+      daysLeft: 1,
+    });
   });
 
   it("reports week done and out of reach", () => {
-    expect(paceStatus({ targetReps: 5, weekTotal: 5, elapsedDayOfWeek: 6, hourOfDay: 12 })).toEqual({
+    expect(paceStatus({ targetReps: 5, weekTotal: 5, elapsedDayOfWeek: 6 })).toEqual({
       kind: "week_done",
     });
-    // Saturday morning, 1 of 5 done, remaining days (Sat+Sun) = 2 < 4 needed.
-    expect(paceStatus({ targetReps: 5, weekTotal: 1, elapsedDayOfWeek: 6, hourOfDay: 12 })).toEqual({
+    // Saturday, 1 of 5 done: 4 needed with only Saturday and Sunday left.
+    expect(paceStatus({ targetReps: 5, weekTotal: 1, elapsedDayOfWeek: 6 })).toEqual({
       kind: "out_of_reach",
+      remaining: 4,
+      daysLeft: 2,
     });
+  });
+
+  it("agrees with the scoring engine about when credit is lost", () => {
+    // The chip leaves "on track" exactly when the day's live credit drops
+    // below 1, which is the day the rep has to land or the week is short.
+    for (let day = 1; day <= 7; day++) {
+      for (let done = 0; done <= 5; done++) {
+        const pace = paceStatus({ targetReps: 5, weekTotal: done, elapsedDayOfWeek: day });
+        const { credit } = habitCredit({
+          type: "weekly_frequency",
+          targetReps: 5,
+          repsToday: 0,
+          doneThroughDay: done,
+          weekTotal: done,
+          elapsedDayOfWeek: day,
+          isLive: true,
+        });
+        const urgent = pace.kind === "last_chance" || pace.kind === "out_of_reach";
+        expect(urgent).toBe(credit < 1);
+      }
+    }
   });
 });

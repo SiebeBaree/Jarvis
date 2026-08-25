@@ -5,7 +5,6 @@ import { db } from "@/db/client";
 import { habitCompletions } from "@/db/schema";
 import type { SettingsRow } from "./auth";
 import { addDays, weekEnd, weekStart, type DayKey } from "./daykey";
-import { dailyStreak, weeklyStreak } from "./scoring/engine";
 import { habitApplicable, type HabitRow } from "./scoring/snapshot";
 
 export const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -35,7 +34,8 @@ export async function habitRepsByDay(
 
 export interface HabitStats {
   type: HabitRow["type"];
-  streak: { current: number; best: number; unit: "days" | "weeks" };
+  /** Completion rates over several windows. Deliberately the only summary of
+   * how a habit is going: a rate survives one missed day, a streak does not. */
   rates: Record<string, number | null>;
   totalReps: number;
   firstLoggedDay: DayKey | null;
@@ -66,7 +66,6 @@ export function buildHabitStats(
       [...weekTotals].filter(([, total]) => total >= habit.targetReps).map(([ws]) => ws),
     );
     const currentWeekStart = weekStart(today);
-    const streak = weeklyStreak(qualifying, currentWeekStart, addDays);
 
     // Met weeks ÷ fully completed weeks in the last N weeks (capped at startDate).
     const rate = (nWeeks: number): number | null => {
@@ -83,8 +82,7 @@ export function buildHabitStats(
 
     return {
       type: habit.type,
-      streak: { ...streak, unit: "weeks" },
-      rates: { last4Weeks: rate(4), last12Weeks: rate(12) },
+      rates: { last4Weeks: rate(4), last8Weeks: rate(8), last12Weeks: rate(12) },
       totalReps,
       firstLoggedDay,
       currentWeek: { total: weekTotals.get(currentWeekStart) ?? 0, target: habit.targetReps },
@@ -95,7 +93,6 @@ export function buildHabitStats(
   const qualifying = new Set(
     [...repsByDay].filter(([, reps]) => reps >= habit.targetReps).map(([day]) => day),
   );
-  const streak = dailyStreak(qualifying, today, addDays);
 
   const rate = (windowDays: number): number | null => {
     let start = addDays(today, -(windowDays - 1));
@@ -112,7 +109,6 @@ export function buildHabitStats(
 
   return {
     type: habit.type,
-    streak: { ...streak, unit: "days" },
     rates: { last7: rate(7), last30: rate(30), last90: rate(90) },
     totalReps,
     firstLoggedDay,

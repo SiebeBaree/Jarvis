@@ -20,6 +20,8 @@ struct HabitEditorView: View {
 
     let mode: Mode
     var store: HabitsStore?
+    /// Called once the local edit is applied, before the server confirms, so a
+    /// screen showing this habit can repaint without waiting for the queue.
     var onSaved: (() -> Void)? = nil
 
     @Environment(AppModel.self) private var model
@@ -228,7 +230,7 @@ struct HabitEditorView: View {
 
             switch type {
             case .daily:
-                caption("Once a day. A simple check keeps the streak alive.")
+                caption("Once a day. One check and it is done.")
             case .multiDaily:
                 stepper(
                     label: "Times a day",
@@ -242,7 +244,7 @@ struct HabitEditorView: View {
                     value: $timesPerWeek,
                     range: 1...7,
                 )
-                caption("Only the weekly total counts. Swap days freely.")
+                caption("Only the weekly total counts. Swap days freely, and skipping one costs nothing while the total is still reachable.")
             }
 
             if isEditing {

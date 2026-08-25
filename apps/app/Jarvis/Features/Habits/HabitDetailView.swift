@@ -185,7 +185,7 @@ struct HabitDetailView: View {
             PaceCapsule(
                 target: target,
                 done: total,
-                expectedByTonight: HabitDisplay.expectedByTonight(target: target, dayKey: todayKey),
+                mustHaveByTonight: HabitDisplay.mustHaveByTonight(target: target, dayKey: todayKey),
                 status: status,
                 tint: tintColor,
             )
@@ -205,16 +205,19 @@ struct HabitDetailView: View {
     }
 
     private func weekLine(total: Int, target: Int, status: PaceDisplayStatus) -> String {
-        let remainingDays = 7 - HabitDisplay.weekdayIndex(of: todayKey) + 1
+        let remaining = target - total
         switch status {
         case .weekDone:
             return "Week complete"
-        case .onPace:
-            return "On pace. \(target - total) more by Sunday"
-        case .behind:
-            return "Behind. Need \(target - total) in \(remainingDays) day\(remainingDays == 1 ? "" : "s")"
+        case .onTrack:
+            let days = HabitDisplay.daysLeft(from: todayKey)
+            return "\(remaining) more, \(days) day\(days == 1 ? "" : "s") to do \(remaining == 1 ? "it" : "them")"
+        case .lastChance(let days):
+            return days == 1
+                ? "Today is the last day it fits"
+                : "Every one of the \(days) days left has to count now"
         case .outOfReach:
-            return "Out of reach this week. Every rep still counts toward the total"
+            return "The full week is out of reach. Every rep still counts toward the total"
         }
     }
 
@@ -295,28 +298,28 @@ struct HabitDetailView: View {
 
     // MARK: - Stats tiles
 
+    /// Completion rates over three windows, plus the lifetime count.
+    ///
+    /// This used to lead with the current and best streak, which is the one
+    /// number a single bad day can destroy. A rate absorbs a miss and still
+    /// tells you the truth about the last month.
     private func statsRow(_ habit: HabitDTO) -> some View {
         let loaded = stats.value
-        let rateKey = habit.type == .weeklyFrequency ? "last4Weeks" : "last30"
-        let rateLabel = habit.type == .weeklyFrequency ? "4-week" : "30-day"
-        let rate = loaded?.rates[rateKey] ?? nil
+        let windows: [(key: String, label: String)] = habit.type == .weeklyFrequency
+            ? [("last4Weeks", "Last 4 weeks"), ("last8Weeks", "Last 8 weeks"), ("last12Weeks", "Last 12 weeks")]
+            : [("last7", "Last 7 days"), ("last30", "Last 30 days"), ("last90", "Last 90 days")]
 
         return LazyVGrid(
             columns: [GridItem(.flexible(), spacing: Space.md), GridItem(.flexible(), spacing: Space.md)],
             spacing: Space.md,
         ) {
-            statTile(
-                value: loaded.map { "\($0.streak.current) \($0.streak.unit)" } ?? Placeholder.noValue,
-                label: "Current streak",
-            )
-            statTile(
-                value: loaded.map { "\($0.streak.best) \($0.streak.unit)" } ?? Placeholder.noValue,
-                label: "Best",
-            )
-            statTile(
-                value: rate.map { "\(Int(($0 * 100).rounded()))%" } ?? Placeholder.noValue,
-                label: rateLabel,
-            )
+            ForEach(windows, id: \.key) { window in
+                let rate = loaded?.rates[window.key] ?? nil
+                statTile(
+                    value: rate.map { "\(Int(($0 * 100).rounded()))%" } ?? Placeholder.noValue,
+                    label: window.label,
+                )
+            }
             statTile(
                 value: loaded.map { "\($0.totalReps)" } ?? Placeholder.noValue,
                 label: "Total reps",

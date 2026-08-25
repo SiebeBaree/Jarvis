@@ -496,3 +496,38 @@ was a penalty for something not yet missed, which is the opposite of principle
 - A past day inside the live week shows a pace chip computed from the current
   hour, so the same historical row can flip from "on pace" to "1 behind" at
   18:00 today. Display only, no effect on the score.
+
+## Streaks removed, weekly pace stops accusing (2026-08-25)
+
+Two halves of the same complaint: the app kept judging the middle of a week as
+if it were the end of one.
+
+### Streaks are gone
+
+`docs/spec.md:129` defined streaks as the "hard" metric to the score's
+forgiving one. In practice one missed day deleted a number that had taken
+weeks to build, and the reaction to that is to stop opening the app, which is
+the opposite of what a habit tracker is for.
+
+| Decision | Rationale |
+|---|---|
+| `dailyStreak` and `weeklyStreak` deleted from the engine, `streak` dropped from `GET /habits/:id/stats`, `StreakChip` deleted | Nothing replaces them. A softer streak is still a counter that resets |
+| The two streak tiles on Habit Detail become completion rates: 7 / 30 / 90 days, or 4 / 8 / 12 weeks | The rates were already computed and only one of them was ever shown. A rate absorbs a miss and still tells the truth about the last month. `last8Weeks` is new, purely so the weekly grid has four tiles like the daily one |
+| The `streak` category is gone from the evening nudge, and with it `bestActiveStreak` and its 400-day query | The ladder falls through to the next true thing. One fewer query per nudge |
+| `HabitsStore`'s per-habit stats cache is deleted | It existed only to decorate rows with streak chips, at the cost of one HTTP request per habit on every load of the Habits tab |
+
+### A weekly habit is only behind when it is actually behind
+
+`paceStatus` used `expected = ceil(target × elapsedDays / 7)`. "Clean the
+apartment" once a week wants 0.14 of a rep on Monday, rounded up to 1, so it
+read "1 behind" from Tuesday morning until it was done. Gym at 5x wanted 3 by
+Wednesday evening, so skipping Tuesday was an accusation on a Wednesday you
+had every intention of training. Both were arithmetic, not information.
+
+| Decision | Rationale |
+|---|---|
+| Pace is now reachability: `week_done`, `on_track`, `last_chance` (reps left = days left), `out_of_reach` | The same rule the score has used since 2026-08-18. The chip and the score can no longer disagree, and a test walks all 35 day/count combinations to hold that |
+| There is no "behind" state at all | Between "you have slack" and "you cannot make it" there is nothing worth saying. A number counting how far off a straight line you are is not a fact about the week |
+| The 18:00 rule is deleted, along with `hourOfDay` on the API and `elapsedDays` in Swift | It existed to stop the old formula accusing you at 7 AM. Reachability does not need it: today is a day you can still act on until the day boundary passes. This also fixes the last open item from the 2026-08-18 entry, where a past row could flip from "on pace" to "1 behind" at 18:00 today |
+| On track says "1/5 this week" and nothing else | Silence is the correct output for a week that is going to be fine |
+| The pace tick moves from `target × elapsed / 7` to `max(0, target − daysLeft)` | It now marks the last point where a perfect week is still savable, which is the same number the score's `expected` field carries. Zero for most of the week, so the tick is usually hidden |

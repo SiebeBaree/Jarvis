@@ -19,8 +19,6 @@ export type CheckinNudgeData = {
   openTasksToday: number;
   /** Open tasks whose due date has already passed. */
   overdueTasks: number;
-  /** Longest run among the daily habits currently going. */
-  bestActiveStreak: { habitName: string; days: number } | null;
   /** False when the user has never logged a mood at all. */
   hasAnyMoodEntry: boolean;
 };
@@ -29,7 +27,6 @@ export type NudgeCategory =
   | "first_entry"
   | "yesterday_bad"
   | "overdue"
-  | "streak"
   | "busy_day"
   | "yesterday_good"
   | "generic";
@@ -45,7 +42,6 @@ export type ComposedNudge = {
 // Thresholds sit here rather than inline so the tests and the ladder agree.
 const BAD_MOOD_AT_OR_BELOW = 40;
 const GOOD_MOOD_AT_OR_ABOVE = 70;
-const STREAK_WORTH_MENTIONING = 3;
 const BUSY_DAY_TASKS = 4;
 
 type Variant = (data: CheckinNudgeData) => { title: string; body: string };
@@ -86,16 +82,6 @@ const CATALOGUE: Record<NudgeCategory, [Variant, ...Variant[]]> = {
     (d) => ({
       title: "Daily check-in",
       body: `Today's check-in is still open, and ${d.overdueTasks} ${plural(d.overdueTasks, "task", "tasks")} slipped past ${plural(d.overdueTasks, "its", "their")} date. Log the mood first, then decide about the rest.`,
-    }),
-  ],
-  streak: [
-    (d) => ({
-      title: "Daily check-in",
-      body: `${d.bestActiveStreak?.habitName} is at ${d.bestActiveStreak?.days} days in a row. Today's mood entry is still open.`,
-    }),
-    (d) => ({
-      title: "Daily check-in",
-      body: `You have kept ${d.bestActiveStreak?.habitName} going for ${d.bestActiveStreak?.days} days. The mood log for today is the remaining item.`,
     }),
   ],
   busy_day: [
@@ -139,7 +125,6 @@ function categoryFor(data: CheckinNudgeData): NudgeCategory {
   if (!data.hasAnyMoodEntry) return "first_entry";
   if (data.yesterdayMood !== null && data.yesterdayMood <= BAD_MOOD_AT_OR_BELOW) return "yesterday_bad";
   if (data.overdueTasks >= 1) return "overdue";
-  if (data.bestActiveStreak && data.bestActiveStreak.days >= STREAK_WORTH_MENTIONING) return "streak";
   if (data.openTasksToday >= BUSY_DAY_TASKS) return "busy_day";
   if (data.yesterdayMood !== null && data.yesterdayMood >= GOOD_MOOD_AT_OR_ABOVE) return "yesterday_good";
   return "generic";
@@ -175,7 +160,6 @@ export function allVariantsForLint(): { category: NudgeCategory; title: string; 
     yesterdayMood: 50,
     openTasksToday: 5,
     overdueTasks: 3,
-    bestActiveStreak: { habitName: "Gym", days: 12 },
     hasAnyMoodEntry: true,
   };
   const singular: CheckinNudgeData = { ...sample, openTasksToday: 1, overdueTasks: 1 };
